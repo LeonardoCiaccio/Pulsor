@@ -7,8 +7,8 @@ import { Logger } from './logger.class.js';
 class PulseBase {
 
   #alias = 'default';
-  #console = null;
-  #pulser = () => { };
+  _console = null;
+  _pulser = () => { };
 
   /**
    * Creates an instance of BasePulse.
@@ -18,11 +18,14 @@ class PulseBase {
    * @param {Object} [loggerServices={}] - Configuration for logger services.
    */
   constructor(prefix, alias, pulser, loggerServices = {}) {
+
     this.#alias = this.#validateAlias(alias);
-    this.#pulser = this.#validatePulser(pulser);
-    this.#console = new Logger(`${prefix}(${this.#alias})`, loggerServices);
-    this.#console.log('Instance created');
-  }
+    this._console = new Logger(`${prefix}(${this.#alias})`, loggerServices);
+
+    this._pulser = this.#validatePulser(pulser);
+    this._console.log('Instance created');
+
+  };
 
   /**
    * Formats a message with the current prefix and alias.
@@ -30,8 +33,8 @@ class PulseBase {
    * @returns {string} The formatted message.
    */
   #format(message) {
-    return `${this.#console.format('')}: ${message}`.replace(': : ', ': ');
-  }
+    return `${this._console?.format?.(message) ?? message}`;
+  };
 
   /**
    * Validates and trims the alias.
@@ -47,7 +50,7 @@ class PulseBase {
     }
 
     return aliasTrimmed;
-  }
+  };
 
   /**
    * Validates that the pulser is a function.
@@ -60,26 +63,9 @@ class PulseBase {
       throw new Error(this.#format('Pulser must be a function'));
     }
     return pulser;
-  }
+  };
 
-  /**
-   * Gets the pulser function.
-   * @protected
-   * @returns {Function} The pulser function.
-   */
-  _getPulser() {
-    return this.#pulser;
-  }
-
-  /**
-   * Gets the console logger.
-   * @protected
-   * @returns {Logger} The console logger.
-   */
-  _getConsole() {
-    return this.#console;
-  }
-}
+};
 
 /**
  * Synchronous pulse class for executing functions.
@@ -101,10 +87,10 @@ export class Pulse extends PulseBase {
    * @param {...*} args - Arguments to pass to the pulser.
    */
   emit(...args) {
-    this._getPulser()(...args);
-    this._getConsole().log('Pulser emitted');
+    this._pulser(...args);
+    this._console.log('Pulser emitted');
   }
-}
+};
 
 /**
  * Asynchronous pulse class for executing async functions.
@@ -127,7 +113,7 @@ export class PulseAsync extends PulseBase {
    * @returns {Promise<void>} A promise that resolves when the pulser completes.
    */
   async emit(...args) {
-    await this._getPulser()(...args);
-    this._getConsole().log('Pulser emitted asynchronously');
+    await this._pulser(...args);
+    this._console.log('Pulser emitted asynchronously');
   }
-}
+};
