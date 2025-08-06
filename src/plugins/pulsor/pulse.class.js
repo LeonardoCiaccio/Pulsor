@@ -8,6 +8,7 @@ export class Pulse {
   #pulsers = [];
   #pulsersAsync = [];
   #callbacks = [];
+  #callbacksAsync = [];
 
   #format(message) {
     return `${this.#prefix}(${this.#alias}): ${message}`;
@@ -64,17 +65,22 @@ export class Pulse {
     return cleanPulsers;
   }
 
-  #callbackExists(alias) {
+  #callbackExists(alias, callback) {
     const aliasTrimmed = this.#validateAlias(alias);
-    return this.#callbacks.find((c) => c.alias === aliasTrimmed);
+    return this.#callbacks.find((c) => c.alias === aliasTrimmed && c.fn === callback);
+  }
+
+  #callbackAsyncExists(alias, callback) {
+    const aliasTrimmed = this.#validateAlias(alias);
+    return this.#callbacksAsync.find((c) => c.alias === aliasTrimmed && c.fn === callback);
   }
 
   #addCallback(alias, callback) {
     const aliasTrimmed = this.#validateAlias(alias);
     this.#validateCallback(callback);
 
-    if (this.#callbackExists(aliasTrimmed)) {
-      throw new Error(this.#format('Callback already exists'));
+    if (this.#callbackExists(aliasTrimmed, callback)) {
+      throw new Error(this.#format(`Callback '${aliasTrimmed}' already exists`));
     }
     this.#callbacks.push({
       alias: aliasTrimmed,
@@ -83,15 +89,40 @@ export class Pulse {
     this.#console.log(`Callback '${aliasTrimmed}' added`);
   };
 
+  #addCallbackAsync(alias, callback) {
+    const aliasTrimmed = this.#validateAlias(alias);
+    this.#validateCallback(callback);
+
+    if (this.#callbackAsyncExists(aliasTrimmed, callback)) {
+      throw new Error(this.#format(`Callback async '${aliasTrimmed}' already exists`));
+    }
+    this.#callbacksAsync.push({
+      alias: aliasTrimmed,
+      fn: callback
+    });
+    this.#console.log(`Callback async '${aliasTrimmed}' added`);
+  };
+
   #removeCallback(alias, callback) {
     const aliasTrimmed = this.#validateAlias(alias);
     this.#validateCallback(callback);
 
-    if (!this.#callbackExists(aliasTrimmed)) {
-      return this.#console.log(`Callback '${aliasTrimmed}' not found`);
+    if (!this.#callbackExists(aliasTrimmed, callback)) {
+      return this.#console.warn(`Callback '${aliasTrimmed}' not found`);
     }
     this.#callbacks = this.#callbacks.filter((c) => c.alias !== aliasTrimmed && c.fn !== callback);
     this.#console.log(`Callback '${aliasTrimmed}' removed`);
+  };
+
+  #removeCallbackAsync(alias, callback) {
+    const aliasTrimmed = this.#validateAlias(alias);
+    this.#validateCallback(callback);
+
+    if (!this.#callbackAsyncExists(aliasTrimmed, callback)) {
+      return this.#console.warn(`Callback async '${aliasTrimmed}' not found`);
+    }
+    this.#callbacksAsync = this.#callbacksAsync.filter((c) => c.alias !== aliasTrimmed && c.fn !== callback);
+    this.#console.log(`Callback async '${aliasTrimmed}' removed`);
   };
 
   // Constructor
@@ -134,6 +165,14 @@ export class Pulse {
 
   off(alias, callback) {
     this.#removeCallback(alias, callback);
+  };
+
+  onAsync(alias, callback) {
+    this.#addCallbackAsync(alias, callback);
+  };
+
+  offAsync(alias, callback) {
+    this.#removeCallbackAsync(alias, callback);
   };
 
 };
