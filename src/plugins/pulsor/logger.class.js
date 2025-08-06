@@ -97,6 +97,11 @@ export class Logger {
    * @returns {string} The formatted message.
    */
   format(message) {
+    const trimmedMessage = (message || '').toString().trim();
+
+    if (trimmedMessage.length === 0) {
+      throw new Error(this.format('Format message cannot be empty or contain only whitespace'));
+    }
     return `${this.#prefix}: ${message}`;
   };
 

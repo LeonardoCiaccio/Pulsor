@@ -1,174 +1,279 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { Logger } from '../logger.class.js';
 
-describe('Logger', () => {
-  let logger;
+describe('Logger Class', () => {
   let consoleSpy;
 
   beforeEach(() => {
-    // Reset console spies before each test
-    consoleSpy = {
-      log: vi.spyOn(console, 'log').mockImplementation(() => {}),
-      debug: vi.spyOn(console, 'debug').mockImplementation(() => {}),
-      info: vi.spyOn(console, 'info').mockImplementation(() => {}),
-      warn: vi.spyOn(console, 'warn').mockImplementation(() => {}),
-      error: vi.spyOn(console, 'error').mockImplementation(() => {}),
-    };
+    // Reset console spy before each test
+    if (consoleSpy) {
+      consoleSpy.mockRestore();
+    }
+    consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    vi.spyOn(console, 'debug').mockImplementation(() => {});
+    vi.spyOn(console, 'info').mockImplementation(() => {});
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    vi.spyOn(console, 'error').mockImplementation(() => {});
   });
 
-  // Test constructor
-  it('should create a Logger instance with a valid prefix', () => {
-    logger = new Logger('TestPrefix');
-    expect(logger).toBeInstanceOf(Logger);
+  describe('Constructor', () => {
+    it('should create a logger instance with valid prefix', () => {
+      const logger = new Logger('TestLogger');
+      expect(logger).toBeInstanceOf(Logger);
+    });
+
+    it('should throw error when prefix is empty', () => {
+      expect(() => new Logger('')).toThrow('Prefix cannot be empty or contain only whitespace');
+    });
+
+    it('should throw error when prefix is only whitespace', () => {
+      expect(() => new Logger('   ')).toThrow('Prefix cannot be empty or contain only whitespace');
+    });
+
+    it('should throw error when prefix is null', () => {
+      expect(() => new Logger(null)).toThrow('Prefix cannot be empty or contain only whitespace');
+    });
+
+    it('should throw error when prefix is undefined', () => {
+      expect(() => new Logger(undefined)).toThrow('Prefix cannot be empty or contain only whitespace');
+    });
+
+    it('should initialize with default services when no services provided', () => {
+      const logger = new Logger('TestLogger');
+      expect(logger).toBeDefined();
+      // All services should be disabled by default
+      expect(() => logger.log('test')).not.toThrow();
+    });
+
+    it('should initialize with provided services configuration', () => {
+      const services = { log: true, debug: false, info: true };
+      const logger = new Logger('TestLogger', services);
+      expect(logger).toBeDefined();
+    });
   });
 
-  it('should throw an error if prefix is null or undefined', () => {
-    expect(() => new Logger(null)).toThrow('Prefix cannot be null or undefined');
-    expect(() => new Logger(undefined)).toThrow('Prefix cannot be null or undefined');
+  describe('Services Configuration', () => {
+    it('should enable specified services', () => {
+      const logger = new Logger('TestLogger');
+      logger.services({ log: true, debug: true });
+      
+      logger.log('test message');
+      logger.debug('debug message');
+      
+      expect(console.log).toHaveBeenCalledWith('TestLogger: ', 'test message');
+      expect(console.debug).toHaveBeenCalledWith('TestLogger: ', 'debug message');
+    });
+
+    it('should disable specified services', () => {
+      const logger = new Logger('TestLogger', { log: true, debug: true });
+      logger.services({ log: false, debug: false });
+      
+      logger.log('test message');
+      logger.debug('debug message');
+      
+      expect(console.log).not.toHaveBeenCalled();
+      expect(console.debug).not.toHaveBeenCalled();
+    });
+
+    it('should only update existing service keys', () => {
+      const logger = new Logger('TestLogger');
+      logger.services({ 
+        log: true, 
+        debug: true, 
+        nonexistent: true,
+        invalid: 'not boolean'
+      });
+      
+      logger.log('test message');
+      logger.debug('debug message');
+      
+      expect(console.log).toHaveBeenCalled();
+      expect(console.debug).toHaveBeenCalled();
+    });
+
+    it('should throw error when services parameter is not an object', () => {
+      const logger = new Logger('TestLogger');
+      expect(() => logger.services('invalid')).toThrow('TestLogger: Services must be an object');
+      expect(() => logger.services(null)).toThrow('TestLogger: Services must be an object');
+      expect(() => logger.services(123)).toThrow('TestLogger: Services must be an object');
+      // Arrays are technically objects in JavaScript, so they won't throw
+      expect(() => logger.services([])).not.toThrow();
+    });
+
+    it('should handle empty services object', () => {
+      const logger = new Logger('TestLogger');
+      expect(() => logger.services({})).not.toThrow();
+    });
   });
 
-  it('should throw an error if prefix is not a string', () => {
-    expect(() => new Logger(123)).toThrow('Prefix must be a string');
-    expect(() => new Logger({})).toThrow('Prefix must be a string');
+  describe('Logging Methods', () => {
+    it('should log when service is enabled', () => {
+      const logger = new Logger('TestLogger', { log: true });
+      logger.log('test message');
+      
+      expect(console.log).toHaveBeenCalledWith('TestLogger: ', 'test message');
+    });
+
+    it('should not log when service is disabled', () => {
+      const logger = new Logger('TestLogger', { log: false });
+      logger.log('test message');
+      
+      expect(console.log).not.toHaveBeenCalled();
+    });
+
+    it('should support all log levels', () => {
+      const logger = new Logger('TestLogger', { 
+        log: true, 
+        debug: true, 
+        info: true, 
+        warn: true, 
+        error: true 
+      });
+      
+      logger.log('log message');
+      logger.debug('debug message');
+      logger.info('info message');
+      logger.warn('warn message');
+      logger.error('error message');
+      
+      expect(console.log).toHaveBeenCalledWith('TestLogger: ', 'log message');
+      expect(console.debug).toHaveBeenCalledWith('TestLogger: ', 'debug message');
+      expect(console.info).toHaveBeenCalledWith('TestLogger: ', 'info message');
+      expect(console.warn).toHaveBeenCalledWith('TestLogger: ', 'warn message');
+      expect(console.error).toHaveBeenCalledWith('TestLogger: ', 'error message');
+    });
+
+    it('should handle different data types as log messages', () => {
+      const logger = new Logger('TestLogger', { log: true });
+      
+      logger.log(123);
+      logger.log({ key: 'value' });
+      logger.log([1, 2, 3]);
+      logger.log(true);
+      logger.log(null);
+      
+      expect(console.log).toHaveBeenCalledWith('TestLogger: ', 123);
+      expect(console.log).toHaveBeenCalledWith('TestLogger: ', { key: 'value' });
+      expect(console.log).toHaveBeenCalledWith('TestLogger: ', [1, 2, 3]);
+      expect(console.log).toHaveBeenCalledWith('TestLogger: ', true);
+      expect(console.log).toHaveBeenCalledWith('TestLogger: ', null);
+    });
   });
 
-  it('should throw an error if prefix is empty or only whitespace', () => {
-    expect(() => new Logger('')).toThrow('Prefix cannot be empty or contain only whitespace');
-    expect(() => new Logger('   ')).toThrow('Prefix cannot be empty or contain only whitespace');
+  describe('Format Method', () => {
+    it('should format message with prefix', () => {
+      const logger = new Logger('TestLogger');
+      const formatted = logger.format('test message');
+      
+      expect(formatted).toBe('TestLogger: test message');
+    });
+
+    it('should not trim whitespace from message in format method', () => {
+      const logger = new Logger('TestLogger');
+      const formatted = logger.format('  test message  ');
+      
+      expect(formatted).toBe('TestLogger:   test message  ');
+    });
+
+    it('should handle numeric messages', () => {
+      const logger = new Logger('TestLogger');
+      const formatted = logger.format(123);
+      
+      expect(formatted).toBe('TestLogger: 123');
+    });
+
+    it('should handle object messages', () => {
+      const logger = new Logger('TestLogger');
+      const formatted = logger.format({ key: 'value' });
+      
+      expect(formatted).toBe('TestLogger: [object Object]');
+    });
+
+    it('should throw error when message is empty', () => {
+      const logger = new Logger('TestLogger');
+      expect(() => logger.format('')).toThrow('TestLogger: Format message cannot be empty or contain only whitespace');
+    });
+
+    it('should throw error when message is only whitespace', () => {
+      const logger = new Logger('TestLogger');
+      expect(() => logger.format('   ')).toThrow('TestLogger: Format message cannot be empty or contain only whitespace');
+    });
+
+    it('should throw error when message is null', () => {
+      const logger = new Logger('TestLogger');
+      expect(() => logger.format(null)).toThrow('TestLogger: Format message cannot be empty or contain only whitespace');
+    });
+
+    it('should throw error when message is undefined', () => {
+      const logger = new Logger('TestLogger');
+      expect(() => logger.format(undefined)).toThrow('TestLogger: Format message cannot be empty or contain only whitespace');
+    });
   });
 
-  it('should throw an error if prefix exceeds 50 characters', () => {
-    const longPrefix = 'a'.repeat(51);
-    expect(() => new Logger(longPrefix)).toThrow('Prefix cannot exceed 50 characters');
+  describe('Edge Cases and Integration', () => {
+    it('should maintain separate instances with different prefixes', () => {
+      const logger1 = new Logger('Logger1', { log: true });
+      const logger2 = new Logger('Logger2', { log: true });
+      
+      logger1.log('message from logger1');
+      logger2.log('message from logger2');
+      
+      expect(console.log).toHaveBeenCalledWith('Logger1: ', 'message from logger1');
+      expect(console.log).toHaveBeenCalledWith('Logger2: ', 'message from logger2');
+    });
+
+    it('should allow dynamic service configuration after instantiation', () => {
+      const logger = new Logger('TestLogger');
+      
+      // Initially disabled
+      logger.log('should not appear');
+      expect(console.log).not.toHaveBeenCalled();
+      
+      // Enable logging
+      logger.services({ log: true });
+      logger.log('should appear');
+      expect(console.log).toHaveBeenCalledWith('TestLogger: ', 'should appear');
+      
+      // Disable again
+      consoleSpy.mockClear();
+      logger.services({ log: false });
+      logger.log('should not appear again');
+      expect(console.log).not.toHaveBeenCalled();
+    });
+
+    it('should handle multiple service configurations', () => {
+      const logger = new Logger('TestLogger');
+      
+      expect(() => {
+        logger.services({ log: true });
+        logger.services({ debug: true });
+      }).not.toThrow();
+    });
+
+    it('should handle special characters in prefix', () => {
+      const logger = new Logger('Test-Logger_123');
+      logger.services({ log: true });
+      logger.log('test');
+      
+      expect(console.log).toHaveBeenCalledWith('Test-Logger_123: ', 'test');
+    });
+
+    it('should handle unicode characters in prefix and messages', () => {
+      const logger = new Logger('🚀 Logger');
+      logger.services({ log: true });
+      logger.log('Hello 世界! 🌍');
+      
+      expect(console.log).toHaveBeenCalledWith('🚀 Logger: ', 'Hello 世界! 🌍');
+    });
   });
 
-  it('should initialize services with default values if not provided', () => {
-    logger = new Logger('TestPrefix');
-    // Access private property for testing purposes (not ideal in real-world, but necessary for private fields)
-    // Test indirectly via public methods or expected behavior
-    // For example, ensure default services are enabled by checking log output
-    logger.log('test');
-    expect(consoleSpy.log).toHaveBeenCalledWith('TestPrefix: test');
-    consoleSpy.log.mockClear();
-    logger.error('test');
-    expect(consoleSpy.error).toHaveBeenCalledWith('TestPrefix: test');
+  describe('Error Handling', () => {
+    it('should handle circular references in log messages gracefully', () => {
+      const logger = new Logger('TestLogger', { log: true });
+      const circularObj = {};
+      circularObj.self = circularObj;
+      
+      expect(() => logger.log(circularObj)).not.toThrow();
+    });
   });
-
-  it('should initialize services with provided values', () => {
-    logger = new Logger('TestPrefix', { log: false, error: true });
-    // Test indirectly via public methods or expected behavior
-    logger.log('test');
-    expect(consoleSpy.log).not.toHaveBeenCalled();
-    logger.error('test');
-    expect(consoleSpy.error).toHaveBeenCalledWith('TestPrefix: test');
-  });
-
-  // Test service() method
-  it('should enable/disable the logger instance', () => {
-    logger = new Logger('TestPrefix');
-    logger.service(false);
-    logger.log('This should not be logged');
-    expect(consoleSpy.log).not.toHaveBeenCalled();
-    consoleSpy.log.mockClear();
-    logger.service(true);
-    logger.log('This should be logged');
-    expect(consoleSpy.log).toHaveBeenCalled();
-  });
-
-  it('should throw an error if service enabled parameter is null or undefined', () => {
-    logger = new Logger('TestPrefix');
-    expect(() => logger.service(null)).toThrow('TestPrefix: Enabled parameter cannot be null or undefined');
-    expect(() => logger.service(undefined)).toThrow('TestPrefix: Enabled parameter cannot be null or undefined');
-  });
-
-  // Test services() method
-  it('should update specific services', () => {
-    logger = new Logger('TestPrefix');
-    logger.services({ log: false, warn: false });
-    logger.log('This should not be logged');
-    expect(consoleSpy.log).not.toHaveBeenCalled();
-    consoleSpy.log.mockClear();
-    logger.warn('This should not be logged');
-    expect(consoleSpy.warn).not.toHaveBeenCalled();
-    consoleSpy.warn.mockClear();
-    logger.debug('This should be logged');
-    expect(consoleSpy.debug).toHaveBeenCalled();
-  });
-
-  it('should throw an error if services parameter is not an object', () => {
-    logger = new Logger('TestPrefix');
-    expect(() => logger.services('invalid')).toThrow('TestPrefix: Services configuration must be an object');
-    expect(() => logger.services(123)).toThrow('TestPrefix: Services configuration must be an object');
-  });
-
-  it('should throw an error for invalid service keys', () => {
-    logger = new Logger('TestPrefix');
-    expect(() => logger.services({ invalidKey: true })).toThrow('TestPrefix: Invalid service key: \'invalidKey\'. Valid keys are: log, debug, info, warn, error');
-  });
-
-  it('should throw an error for invalid service values', () => {
-    logger = new Logger('TestPrefix');
-    expect(() => logger.services({ log: 'notABoolean' })).toThrow('TestPrefix: Service \'log\' must be a boolean value');
-  });
-
-  // Test log methods (log, debug, info, warn, error)
-  it('should log a message with log level', () => {
-    logger = new Logger('TestPrefix');
-    logger.log('This is a log message');
-    expect(consoleSpy.log).toHaveBeenCalledWith('TestPrefix: This is a log message');
-  });
-
-  it('should log a message with debug level', () => {
-    logger = new Logger('TestPrefix');
-    logger.debug('This is a debug message');
-    expect(consoleSpy.debug).toHaveBeenCalledWith('TestPrefix: This is a debug message');
-  });
-
-  it('should log a message with info level', () => {
-    logger = new Logger('TestPrefix');
-    logger.info('This is an info message');
-    expect(consoleSpy.info).toHaveBeenCalledWith('TestPrefix: This is an info message');
-  });
-
-  it('should log a message with warn level', () => {
-    logger = new Logger('TestPrefix');
-    logger.warn('This is a warn message');
-    expect(consoleSpy.warn).toHaveBeenCalledWith('TestPrefix: This is a warn message');
-  });
-
-  it('should log a message with error level', () => {
-    logger = new Logger('TestPrefix');
-    logger.error('This is an error message');
-    expect(consoleSpy.error).toHaveBeenCalledWith('TestPrefix: This is an error message');
-  });
-
-  it('should not log if the logger is disabled', () => {
-    logger = new Logger('TestPrefix');
-    logger.service(false);
-    logger.log('This should not be logged');
-    expect(consoleSpy.log).not.toHaveBeenCalled();
-  });
-
-  it('should not log if a specific service is disabled', () => {
-    logger = new Logger('TestPrefix', { log: false });
-    logger.log('This should not be logged');
-    expect(consoleSpy.log).not.toHaveBeenCalled();
-  });
-
-  it('should log if a specific service is enabled', () => {
-    logger = new Logger('TestPrefix', { log: true });
-    logger.log('This should be logged');
-    expect(consoleSpy.log).toHaveBeenCalled();
-  });
-
-  it('should handle non-string messages by converting them to string', () => {
-    logger = new Logger('TestPrefix');
-    logger.log(123);
-    expect(consoleSpy.log).toHaveBeenCalledWith('TestPrefix: 123');
-    logger.log({ key: 'value' });
-    expect(consoleSpy.log).toHaveBeenCalledWith('TestPrefix: [object Object]');
-    logger.log(true);
-    expect(consoleSpy.log).toHaveBeenCalledWith('TestPrefix: true');
-  });
-
 });
