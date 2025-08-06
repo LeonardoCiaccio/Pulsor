@@ -38,7 +38,7 @@ export class Logger {
 
   services(services = {}) {
     if (typeof services !== 'object' || services === null) {
-      return;
+      throw new Error(this.format('Services must be an object'));
     }
 
     for (const key of Object.keys(services)) {
