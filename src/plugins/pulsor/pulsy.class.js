@@ -14,11 +14,15 @@ export class Pulsy {
 
   #log(message, type = 'log') {
 
-    type = this.#normalizeString(type);
-    if (type.length === 0) throw new Error(this.#createError('Invalid log type'));
+    if (!this.#params.debug) return;
 
-    if (!this.#params.debug || !console[type]) return;
-    console[type](`[Pulsy] ${message}`);
+    type = this.#normalizeString(type);
+    if (type.length === 0) type = 'log';
+
+    if (!console[type])
+      throw new Error(this.#formatLog('Invalid log type'));
+
+    console[type](this.#formatLog(message));
   }
 
   #normalizeString(str) {
@@ -28,21 +32,21 @@ export class Pulsy {
     return str.replace(/\s+/g, '').toLowerCase();
   }
 
-  #createError(message) {
-    return `Pulsy: ${message}`;
+  #formatLog(message) {
+    return `[Pulsy]: ${message}`;
   }
 
   #validateToken(token) {
     if (!token || typeof token !== 'symbol') {
-      throw new Error(this.#createError('Invalid token'));
+      throw new Error(this.#formatLog('Invalid token'));
     }
   }
 
   #validateAlias(alias) {
-    alias = this.#normalizeString(alias);
+    alias = alias?.trim() || '';
 
     if (alias.length === 0) {
-      throw new Error(this.#createError('Alias is required'));
+      throw new Error(this.#formatLog('Alias is required'));
     }
 
     return alias;
@@ -58,12 +62,18 @@ export class Pulsy {
     this.#validateOptions(options);
     this.#token = Symbol(`Pulsor ${Date.now()}`);
 
+    this.#log(`Instance created successfully: ${this.#token}`);
+
   };
 
   update(token, options) {
     this.#validateToken(token);
     this.#validateOptions(options);
     this.#params = { ...this.#params, ...options };
+
+    this.#log(`Instance updated successfully: ${this.#token}`);
+    return { ...this.#params };
+
   }
 
   get params() {
@@ -72,7 +82,7 @@ export class Pulsy {
 
   getOneTimeToken() {
     if (this.#isTokenProvided) {
-      throw new Error(this.#createError('Token already provided'));
+      throw new Error(this.#formatLog('Token already provided'));
     }
     this.#isTokenProvided = true;
     return this.#token;
