@@ -4,12 +4,22 @@
 
 export class Pulsy {
 
-  #token = Symbol(`Pulsor ${Date.now()}`);
+  #token;
   #isTokenProvided = false;
 
   #params = {
+    debug: false,
     alias: '' // required
   };
+
+  #log(message, type = 'log') {
+
+    type = this.#normalizeString(type);
+    if (type.length === 0) throw new Error(this.#createError('Invalid log type'));
+
+    if (!this.#params.debug || !console[type]) return;
+    console[type](`[Pulsy] ${message}`);
+  }
 
   #normalizeString(str) {
     if (!str || typeof str !== 'string') {
@@ -20,6 +30,12 @@ export class Pulsy {
 
   #createError(message) {
     return `Pulsy: ${message}`;
+  }
+
+  #validateToken(token) {
+    if (!token || typeof token !== 'symbol') {
+      throw new Error(this.#createError('Invalid token'));
+    }
   }
 
   #validateAlias(alias) {
@@ -40,13 +56,12 @@ export class Pulsy {
   constructor(options = {}) {
 
     this.#validateOptions(options);
+    this.#token = Symbol(`Pulsor ${Date.now()}`);
 
   };
 
   update(token, options) {
-    if (token !== this.#token) {
-      throw new Error(this.#createError('Invalid token for update params'));
-    }
+    this.#validateToken(token);
     this.#validateOptions(options);
     this.#params = { ...this.#params, ...options };
   }
