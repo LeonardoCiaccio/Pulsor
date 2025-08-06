@@ -16,7 +16,7 @@ export class Pulse {
   constructor(pulsy) {
 
     if (!(pulsy instanceof Pulsy)) {
-      throw new Error(this.#formatLog('Pulsy must be an instance of Pulsy'));
+      throw new Error(this.#formatLog('Arguments must be an instance of Pulsy'));
     }
 
     this.#params = pulsy.params;

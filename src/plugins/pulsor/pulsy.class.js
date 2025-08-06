@@ -25,15 +25,15 @@ export class Pulsy {
     console[type](this.#formatLog(message));
   }
 
+  #formatLog(message) {
+    return `[Pulsy]: ${message}`;
+  }
+
   #normalizeString(str) {
     if (!str || typeof str !== 'string') {
       return '';
     }
     return str.replace(/\s+/g, '').toLowerCase();
-  }
-
-  #formatLog(message) {
-    return `[Pulsy]: ${message}`;
   }
 
   #validateToken(token) {
