@@ -189,13 +189,13 @@ const // --> METODI ESPORTATI
       Loggy.log(`CallbackAsync added to '${aliasValidated}'`);
     };
 
-    this.UnbindPulse = (callback) => {
+    this.UnBindPulse = (callback) => {
       const callbackValidated = validateCallback(callback);
       Callbacks[aliasValidated] = Callbacks[aliasValidated].filter((c) => c !== callbackValidated);
       Loggy.log(`Callback removed from '${aliasValidated}'`);
     };
 
-    this.UnbindPulseAsync = (callbackAsync) => {
+    this.UnBindPulseAsync = (callbackAsync) => {
       const callbackAsyncValidated = validateCallback(callbackAsync);
       CallbacksAsync[aliasValidated] = CallbacksAsync[aliasValidated].filter((c) => c !== callbackAsyncValidated);
       Loggy.log(`CallbackAsync removed from '${aliasValidated}'`);
