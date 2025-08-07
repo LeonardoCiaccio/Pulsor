@@ -62,11 +62,15 @@ const // --> METODI ESPORTATI
   },
   Destroy = (alias) => {
 
-    const aliasValidated = ValidateAlias(alias);
-    if (!PulserExists(aliasValidated)) {
+    const
+      aliasValidated = ValidateAlias(alias),
+      pulserIndex = Pulsers.findIndex((pulsor) => pulsor.alias === aliasValidated);
+
+    if (pulserIndex === -1) {
       throw new Error(Format(`Pulser '${aliasValidated}' does not exist`));
     }
-    Pulsers = Pulsers.filter((pulsor) => pulsor.alias !== aliasValidated);
+    Pulsers.splice(pulserIndex, 1);
+
     Loggy.log(`Pulser '${aliasValidated}' destroyed`);
 
   },
@@ -84,7 +88,22 @@ const // --> METODI ESPORTATI
     Loggy.log(`PulserAsync '${aliasValidated}' created`);
 
   },
+  DestroyAsync = (alias) => {
+
+    const
+      aliasValidated = ValidateAlias(alias),
+      pulserAsyncIndex = PulsersAsync.findIndex((pulsor) => pulsor.alias === aliasValidated);
+
+    if (pulserAsyncIndex === -1) {
+      throw new Error(Format(`PulserAsync '${aliasValidated}' does not exist`));
+    }
+    PulsersAsync.splice(pulserAsyncIndex, 1);
+
+    Loggy.log(`PulserAsync '${aliasValidated}' destroyed`);
+
+  },
   Pulse = (alias, ...args) => {
+
     const
       aliasValidated = ValidateAlias(alias),
       pulser = GetPulser(aliasValidated, Pulsers);
@@ -92,6 +111,18 @@ const // --> METODI ESPORTATI
       throw new Error(Format(`Pulser '${aliasValidated}' does not exist`));
     }
     return pulser.emit(...args);
+
+  },
+  PulseAsync = async (alias, ...args) => {
+
+    const
+      aliasValidated = ValidateAlias(alias),
+      pulserAsync = GetPulser(aliasValidated, PulsersAsync);
+    if (pulserAsync === undefined) {
+      throw new Error(Format(`PulserAsync '${aliasValidated}' does not exist`));
+    }
+    return await pulserAsync.emit(...args);
+
   };
 
-export { Create, CreateAsync, Pulse };
+export { Create, Destroy, CreateAsync, DestroyAsync, Pulse, PulseAsync };
