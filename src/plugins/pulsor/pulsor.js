@@ -14,10 +14,10 @@ class PulsorError extends Error {
 
 const // PROPRIETA'
   Prefix = '[Pulsor]',
-  Pulsers = [],
-  PulsersAsync = [],
-  Callbacks = [],
-  CallbacksAsync = [],
+  Pulsers = {},
+  PulsersAsync = {},
+  Callbacks = {},
+  CallbacksAsync = {},
   LoggerServices = {
     log: true,
     error: true,
@@ -31,8 +31,8 @@ const // PROPRIETA'
 const // --> VALIDAZIONI private
   validateAlias = (alias) => {
     const trimmedAlias = (alias || '').trim();
-    if (trimmedAlias.length === 0) {
-      throw new PulsorError(F('Alias cannot be empty'));
+    if (trimmedAlias.length === 0 || trimmedAlias.length > 32) {
+      throw new PulsorError(F('Alias cannot be empty or longer than 32 characters'));
     }
     return trimmedAlias;
   },
@@ -41,67 +41,68 @@ const // --> VALIDAZIONI private
       throw new PulsorError(F('Pulser/Async must be a function'));
     }
     return pulse;
+  },
+  validateCallback = (callback) => {
+    if (typeof callback !== 'function') {
+      throw new PulsorError(F('Callback must be a function'));
+    }
+    return callback;
   };
 
 const // --> METODI privati
-  getPulser = (aliasValidated, securePulsersDb) => {
-    return securePulsersDb.find((pulsor) => pulsor.alias === aliasValidated);
-  },
   pulserExists = (aliasValidated, securePulsersDb) => {
-    return getPulser(aliasValidated, securePulsersDb) !== undefined;
+    return securePulsersDb[aliasValidated] !== undefined;
   },
-  createPulser = (aliasValidated, pulseValidated) => {
-    return {
-      alias: aliasValidated,
-      pulse: pulseValidated
-    };
-  },
-  createAndAddPulser = (alias, pulse, securePulsersDb) => {
-    const
-      aliasValidated = validateAlias(alias),
-      pulseValidated = validatePulse(pulse);
+  createPulser = (aliasValidated, pulseValidated, securePulsersDb, override = false) => {
 
     if (pulserExists(aliasValidated, securePulsersDb)) {
-      throw new PulsorError(F(`Pulser '${aliasValidated}' already exists`));
+      if (override) {
+        securePulsersDb[aliasValidated] = pulseValidated;
+        Loggy.log(`Pulser '${aliasValidated}' already exists, overrided`);
+        return;
+      } else {
+        throw new PulsorError(F(`Pulser '${aliasValidated}' already exists`));
+      }
     }
-
-    securePulsersDb.push(createPulser(aliasValidated, pulseValidated));
+    securePulsersDb[aliasValidated] = pulseValidated;
     Loggy.log(`Pulser '${aliasValidated}' created`);
   },
-  destroyPulser = (alias, securePulsersDb) => {
-    const
-      aliasValidated = validateAlias(alias);
+  destroyPulser = (aliasValidated, securePulsersDb) => {
 
     if (!pulserExists(aliasValidated, securePulsersDb)) {
       throw new PulsorError(F(`Pulser '${aliasValidated}' does not exist`));
     }
 
-    const
-      pulserIndex = securePulsersDb.findIndex((pulsor) => pulsor.alias === aliasValidated);
-    securePulsersDb.splice(pulserIndex, 1);
+    delete securePulsersDb[aliasValidated];
 
     Loggy.log(`Pulser '${aliasValidated}' destroyed`);
   };
 
 const // --> METODI ESPORTATI
-  CreatePulser = (alias, pulse) => {
+  CreatePulser = (alias, pulse, override = false) => {
 
-    createAndAddPulser(alias, pulse, Pulsers);
+    const aliasValidated = validateAlias(alias);
+    const pulseValidated = validatePulse(pulse);
+
+    createPulser(aliasValidated, pulseValidated, Pulsers, override);
 
   },
   DestroyPulser = (alias) => {
 
-    destroyPulser(alias, Pulsers);
+    const aliasValidated = validateAlias(alias);
+    destroyPulser(aliasValidated, Pulsers);
 
   },
-  CreatePulserAsync = (alias, pulseAsync) => {
-
-    createAndAddPulser(alias, pulseAsync, PulsersAsync);
+  CreatePulserAsync = (alias, pulseAsync, override = false) => {
+    const aliasValidated = validateAlias(alias);
+    const pulseAsyncValidated = validatePulse(pulseAsync);
+    createPulser(aliasValidated, pulseAsyncValidated, PulsersAsync, override);
 
   },
   DestroyPulserAsync = (alias) => {
 
-    destroyPulser(alias, PulsersAsync);
+    const aliasValidated = validateAlias(alias);
+    destroyPulser(aliasValidated, PulsersAsync);
 
   },
   Pulsor = function (alias) {
@@ -126,6 +127,25 @@ const // --> METODI ESPORTATI
       }
       return await pulsorAsync.pulse(...args);
 
+    };
+
+    this.on = (callback) => {
+      const callbackValidated = validateCallback(callback);
+      Callbacks.push(callbackValidated);
+    };
+
+    this.onAsync = (callbackAsync) => {
+      const callbackAsyncValidated = validateCallback(callbackAsync);
+      CallbacksAsync.push(callbackAsyncValidated);
+    };
+
+    this.off = (callback) => {
+      const callbackValidated = validateCallback(callback);
+      Callbacks = Callbacks.filter((c) => c !== callbackValidated);
+    };
+
+    this.offAsync = (callbackAsync) => {
+      CallbacksAsync = CallbacksAsync.filter((c) => c !== callbackAsync);
     };
   };
 
