@@ -38,13 +38,13 @@ const // --> VALIDAZIONI private
   },
   validatePulse = (pulse) => {
     if (typeof pulse !== 'function') {
-      throw new PulsorError(F('Pulser/Async must be a function'));
+      throw new PulsorError(F('Pulser/PulserAsync must be a function'));
     }
     return pulse;
   },
   validateCallback = (callback) => {
     if (typeof callback !== 'function') {
-      throw new PulsorError(F('Callback must be a function'));
+      throw new PulsorError(F('Callback/CallbackAsync must be a function'));
     }
     return callback;
   };
@@ -94,6 +94,7 @@ const // --> METODI ESPORTATI
 
   },
   CreatePulserAsync = (alias, pulseAsync, override = false) => {
+
     const aliasValidated = validateAlias(alias);
     const pulseAsyncValidated = validatePulse(pulseAsync);
     createPulser(aliasValidated, pulseAsyncValidated, PulsersAsync, override);
@@ -111,7 +112,7 @@ const // --> METODI ESPORTATI
 
     this.Pulse = (...args) => {
 
-      const pulsor = getPulser(aliasValidated, Pulsers);
+      const pulsor = Pulsers[aliasValidated];
       if (pulsor === undefined) {
         throw new PulsorError(F(`Pulser '${aliasValidated}' does not exist`));
       }
@@ -121,7 +122,7 @@ const // --> METODI ESPORTATI
 
     this.PulseAsync = async (...args) => {
 
-      const pulsorAsync = getPulser(aliasValidated, PulsersAsync);
+      const pulsorAsync = PulsersAsync[aliasValidated];
       if (pulsorAsync === undefined) {
         throw new PulsorError(F(`PulserAsync '${aliasValidated}' does not exist`));
       }
@@ -131,23 +132,38 @@ const // --> METODI ESPORTATI
 
     this.on = (callback) => {
       const callbackValidated = validateCallback(callback);
-      Callbacks.push(callbackValidated);
+      Callbacks[aliasValidated].push(callbackValidated);
+      Loggy.log(`Callback added to '${aliasValidated}'`);
     };
 
     this.onAsync = (callbackAsync) => {
       const callbackAsyncValidated = validateCallback(callbackAsync);
-      CallbacksAsync.push(callbackAsyncValidated);
+      CallbacksAsync[aliasValidated].push(callbackAsyncValidated);
+      Loggy.log(`CallbackAsync added to '${aliasValidated}'`);
     };
 
     this.off = (callback) => {
       const callbackValidated = validateCallback(callback);
-      Callbacks = Callbacks.filter((c) => c !== callbackValidated);
+      Callbacks[aliasValidated] = Callbacks[aliasValidated].filter((c) => c !== callbackValidated);
+      Loggy.log(`Callback removed from '${aliasValidated}'`);
     };
 
     this.offAsync = (callbackAsync) => {
-      CallbacksAsync = CallbacksAsync.filter((c) => c !== callbackAsync);
+      const callbackAsyncValidated = validateCallback(callbackAsync);
+      CallbacksAsync[aliasValidated] = CallbacksAsync[aliasValidated].filter((c) => c !== callbackAsyncValidated);
+      Loggy.log(`CallbackAsync removed from '${aliasValidated}'`);
+    };
+
+    this.offAll = () => {
+      delete Callbacks[aliasValidated];
+      Loggy.log(`All callbacks removed from '${aliasValidated}'`);
+    };
+
+    this.offAllAsync = () => {
+      delete CallbacksAsync[aliasValidated];
+      Loggy.log(`All callbacksAsync removed from '${aliasValidated}'`);
     };
   };
 
 
-export { CreatePulser, DestroyPulser, CreatePulserAsync, DestroyPulserAsync, Pulsor };
+export { CreatePulser, DestroyPulser, CreatePulserAsync, DestroyPulserAsync, Pulsor, PulsorError };
