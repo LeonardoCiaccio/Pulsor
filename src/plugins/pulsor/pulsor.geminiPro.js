@@ -6,7 +6,7 @@
  * complete with a powerful callback system. The design emphasizes simplicity,
  * performance, and maintainability.
  *
- * @version 2.1.0
+ * @version 2.0.0
  * @example
  * import { CreatePulser, Pulser } from './pulsor.refactored.js';
  *
@@ -20,14 +20,14 @@
  * }, { isAsync: true });
  *
  * // Use a pulser
- * const mathPulsor = new Pulser('add');
+ * const mathPulsor = new Pulsor('add');
  * const result = mathPulsor.pulse(5, 3); // result is 8
  *
- * const dataPulsor = new Pulser('fetchData');
+ * const dataPulsor = new Pulsor('fetchData');
  * const data = await dataPulsor.pulse('https://api.example.com/data');
  */
 
-import { Logger } from './logger.class.js';
+import { Logger } from './logger.class.js'; // Assuming logger.class.js exists
 
 /**
  * Custom error class for Pulsor-specific errors.
@@ -54,14 +54,11 @@ const LoggerServices = { log: true, error: true, warn: true, debug: false, info:
 const Loggy = new Logger(Prefix, LoggerServices);
 const F = Loggy.format;
 
-// Cache for validated aliases to avoid repeated validation
-const aliasCache = new Map();
-const ALIAS_CACHE_MAX_SIZE = 100; // Prevent memory leaks
 
 // --- Private validation functions ---
 
 /**
- * Validates and trims an alias string with caching for performance.
+ * Validates and trims an alias string.
  * @param {string} alias - The alias to validate.
  * @returns {string} The validated and trimmed alias.
  * @throws {PulsorError} If the alias is invalid.
@@ -71,34 +68,18 @@ const validateAlias = (alias) => {
   if (typeof alias !== 'string') {
     throw new PulsorError(F('Alias must be a string.'));
   }
-
-  // Check cache first
-  if (aliasCache.has(alias)) {
-    return aliasCache.get(alias);
-  }
-
   const trimmedAlias = alias.trim();
   if (trimmedAlias.length === 0 || trimmedAlias.length > 32) {
     throw new PulsorError(F('Alias cannot be empty or longer than 32 characters.'));
   }
-
-  // Cache the result (with size limit)
-  if (aliasCache.size >= ALIAS_CACHE_MAX_SIZE) {
-    // Remove oldest entry (FIFO)
-    const firstKey = aliasCache.keys().next().value;
-    aliasCache.delete(firstKey);
-  }
-  aliasCache.set(alias, trimmedAlias);
-
   return trimmedAlias;
 };
 
 /**
  * Validates that the provided pulse is a function.
- * @param {Function} fn - The function to validate.
- * @param {string} type - The type name for error messages.
+ * @param {Function} pulseFn - The function to validate.
  * @returns {Function} The validated function.
- * @throws {PulsorError} If fn is not a function.
+ * @throws {PulsorError} If pulseFn is not a function.
  * @private
  */
 const validateFunction = (fn, type = 'Function') => {
@@ -108,57 +89,6 @@ const validateFunction = (fn, type = 'Function') => {
   return fn;
 };
 
-/**
- * Creates a new pulser entry with optimized structure.
- * @param {Function} pulseFn - The pulser function.
- * @param {boolean} isAsync - Whether the pulser is asynchronous.
- * @returns {Object} The pulser entry.
- * @private
- */
-const createPulserEntry = (pulseFn, isAsync) => ({
-  pulseFn,
-  isAsync,
-  callbacks: new Set(),
-  // Pre-calculate execution strategy to avoid runtime checks
-  executeCallbacks: isAsync ? executeCallbacksAsync : executeCallbacksSync
-});
-
-/**
- * Executes synchronous callbacks with error handling.
- * @param {Set<Function>} callbacks - The callbacks to execute.
- * @param {Array} args - Arguments to pass.
- * @param {string} alias - Alias for logging.
- * @private
- */
-const executeCallbacksSync = (callbacks, args, alias) => {
-  for (const callback of callbacks) {
-    try {
-      callback(...args);
-    } catch (error) {
-      Loggy.warn(`Sync callback error in '${alias}':`, error.message);
-    }
-  }
-};
-
-/**
- * Executes asynchronous callbacks with error handling.
- * @param {Set<Function>} callbacks - The callbacks to execute.
- * @param {Array} args - Arguments to pass.
- * @param {string} alias - Alias for logging.
- * @returns {Promise<void>}
- * @private
- */
-const executeCallbacksAsync = async (callbacks, args, alias) => {
-  if (callbacks.size === 0) return;
-
-  const promises = Array.from(callbacks, callback =>
-    Promise.resolve(callback(...args)).catch(error => {
-      Loggy.warn(`Async callback error in '${alias}':`, error.message);
-    })
-  );
-
-  await Promise.allSettled(promises);
-};
 
 // --- Public API Functions ---
 
@@ -168,24 +98,21 @@ const executeCallbacksAsync = async (callbacks, args, alias) => {
  * @param {Function} pulseFn - The function to execute when pulsed. Can be sync or async.
  * @param {object} [options={}] - Configuration options for the pulser.
  * @param {boolean} [options.override=false] - If true, an existing pulser with the same alias will be overwritten.
- * @param {boolean} [options.isAsync] - If specified, forces async/sync mode. If not specified, auto-detects from function.
+ * @param {boolean} [options.isAsync=false] - If true, the pulser and its callbacks are treated as asynchronous.
  * @throws {PulsorError} If validation fails or if the pulser already exists and `override` is false.
  *
  * @example
  * // Synchronous pulser
  * CreatePulser('greeter', (name) => `Hello, ${name}!`);
  *
- * // Asynchronous pulser (auto-detected)
- * CreatePulser('delay', async (ms) => new Promise(res => setTimeout(res, ms)));
- *
- * // Force sync mode for async function
- * CreatePulser('forceSync', async () => 'immediate', { isAsync: false });
+ * // Asynchronous pulser
+ * CreatePulser('delay', (ms) => new Promise(res => setTimeout(res, ms)), { isAsync: true });
  *
  * // Override an existing pulser
  * CreatePulser('greeter', (name) => `Hi, ${name}!`, { override: true });
  */
 export const CreatePulser = (alias, pulseFn, options = {}) => {
-  const { override = false, isAsync } = options;
+  const { override = false, isAsync = false } = options;
   const aliasValidated = validateAlias(alias);
   const pulseValidated = validateFunction(pulseFn, 'Pulser function');
 
@@ -197,14 +124,13 @@ export const CreatePulser = (alias, pulseFn, options = {}) => {
     }
   }
 
-  // Auto-detect async if not specified
-  const isAsyncResolved = isAsync !== undefined
-    ? isAsync
-    : pulseValidated.constructor.name === 'AsyncFunction';
+  Registry[aliasValidated] = {
+    pulseFn: pulseValidated,
+    isAsync,
+    callbacks: new Set(),
+  };
 
-  Registry[aliasValidated] = createPulserEntry(pulseValidated, isAsyncResolved);
-
-  Loggy.log(`Pulser '${aliasValidated}' (${isAsyncResolved ? 'async' : 'sync'}) created.`);
+  Loggy.log(`Pulser '${aliasValidated}' (${isAsync ? 'async' : 'sync'}) created.`);
 };
 
 /**
@@ -244,42 +170,6 @@ export const PulserExists = (alias) => {
 };
 
 /**
- * Lists all registered pulser aliases.
- * @returns {string[]} Array of all registered aliases.
- *
- * @example
- * const pulsers = ListPulsers();
- * console.log('Available pulsers:', pulsers);
- */
-export const ListPulsers = () => Object.keys(Registry);
-
-/**
- * Gets information about a specific pulser.
- * @param {string} alias - The alias to get info for.
- * @returns {Object|null} Pulser info or null if not found.
- *
- * @example
- * const info = GetPulserInfo('add');
- * console.log(`Pulser 'add' is ${info.isAsync ? 'async' : 'sync'} with ${info.callbackCount} callbacks`);
- */
-export const GetPulserInfo = (alias) => {
-  try {
-    const aliasValidated = validateAlias(alias);
-    const entry = Registry[aliasValidated];
-    if (!entry) return null;
-
-    return {
-      alias: aliasValidated,
-      isAsync: entry.isAsync,
-      callbackCount: entry.callbacks.size,
-      functionName: entry.pulseFn.name || 'anonymous'
-    };
-  } catch {
-    return null;
-  }
-};
-
-/**
  * The Pulsor class provides an interface to interact with a registered pulser.
  * It is used to execute the pulser's main function and manage its callbacks.
  */
@@ -292,7 +182,7 @@ export class Pulser {
 
   /**
    * @private
-   * @type {{pulseFn: Function, isAsync: boolean, callbacks: Set<Function>, executeCallbacks: Function}}
+   * @type {{pulseFn: Function, isAsync: boolean, callbacks: Set<Function>}}
    */
   #entry;
 
@@ -308,30 +198,6 @@ export class Pulser {
     if (!this.#entry) {
       throw new PulsorError(F(`Cannot create Pulsor instance. Pulser '${this.#alias}' is not registered.`));
     }
-  }
-
-  /**
-   * Gets the alias of this pulser instance.
-   * @returns {string} The pulser alias.
-   */
-  get alias() {
-    return this.#alias;
-  }
-
-  /**
-   * Gets whether this pulser is asynchronous.
-   * @returns {boolean} True if async, false if sync.
-   */
-  get isAsync() {
-    return this.#entry.isAsync;
-  }
-
-  /**
-   * Gets the number of bound callbacks.
-   * @returns {number} The callback count.
-   */
-  get callbackCount() {
-    return this.#entry.callbacks.size;
   }
 
   /**
@@ -362,7 +228,13 @@ export class Pulser {
     const result = this.#entry.pulseFn(...args);
 
     if (this.#entry.callbacks.size > 0) {
-      this.#entry.executeCallbacks(this.#entry.callbacks, args, this.#alias);
+      for (const callback of this.#entry.callbacks) {
+        try {
+          callback(...args);
+        } catch (error) {
+          Loggy.warn(`Sync callback error in '${this.#alias}':`, error.message);
+        }
+      }
     }
 
     return result;
@@ -373,7 +245,15 @@ export class Pulser {
     const result = await this.#entry.pulseFn(...args);
 
     if (this.#entry.callbacks.size > 0) {
-      await this.#entry.executeCallbacks(this.#entry.callbacks, args, this.#alias);
+      const callbackPromises = [];
+      for (const callback of this.#entry.callbacks) {
+        callbackPromises.push(
+          Promise.resolve(callback(...args)).catch(error => {
+            Loggy.warn(`Async callback error in '${this.#alias}':`, error.message);
+          })
+        );
+      }
+      await Promise.allSettled(callbackPromises);
     }
 
     return result;
@@ -402,50 +282,28 @@ export class Pulser {
   /**
    * Unbinds a specific callback function.
    * @param {Function} callback - The callback function to unbind.
-   * @returns {boolean} True if the callback was found and removed, false otherwise.
    *
    * @example
-   * const removed = myPulsor.unbind(loggerCallback);
-   * if (removed) console.log('Callback successfully removed');
+   * myPulsor.unbind(loggerCallback);
    */
   unbind(callback) {
     validateFunction(callback, 'Callback');
-    const wasRemoved = this.#entry.callbacks.delete(callback);
-    if (wasRemoved) {
+    if (this.#entry.callbacks.delete(callback)) {
       Loggy.log(`Callback removed from '${this.#alias}'.`);
     }
-    return wasRemoved;
   }
 
   /**
    * Unbinds all callbacks from this pulser.
-   * @returns {number} The number of callbacks that were removed.
    *
    * @example
-   * const removedCount = myPulsor.unbindAll();
-   * console.log(`Removed ${removedCount} callbacks`);
+   * myPulsor.unbindAll();
    */
   unbindAll() {
-    const count = this.#entry.callbacks.size;
-    if (count > 0) {
+    if (this.#entry.callbacks.size > 0) {
       this.#entry.callbacks.clear();
-      Loggy.log(`All ${count} callbacks removed from '${this.#alias}'.`);
+      Loggy.log(`All callbacks removed from '${this.#alias}'.`);
     }
-    return count;
-  }
-
-  /**
-   * Creates a bound version of the pulse method that can be called without context.
-   * Useful for passing as a callback or event handler.
-   *
-   * @returns {Function} A bound pulse function.
-   *
-   * @example
-   * const boundPulse = myPulsor.bound();
-   * setTimeout(boundPulse, 1000, 'delayed', 'execution');
-   */
-  bound() {
-    return this.pulse.bind(this);
   }
 }
 
