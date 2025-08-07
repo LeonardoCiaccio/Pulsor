@@ -1,14 +1,23 @@
 
 /**
- * L'orchestratore Pulsor
+ * Pulsor module
  */
-import { Pulse as PulseClass, PulseAsync as PulseAsyncClass } from './pulse.class.js';
+
 import { Logger } from './logger.class.js';
+
+class PulsorError extends Error {
+  constructor(message) {
+    super(message);
+    this.name = 'PulsorError';
+  }
+}
 
 const // PROPRIETA'
   Prefix = '[Pulsor]',
   Pulsers = [],
   PulsersAsync = [],
+  Callbacks = [],
+  CallbacksAsync = [],
   LoggerServices = {
     log: true,
     error: true,
@@ -17,112 +26,108 @@ const // PROPRIETA'
     info: true
   },
   Loggy = new Logger(Prefix, LoggerServices),
-  Format = Loggy.format;
+  F = Loggy.format;
 
-const // --> VALIDAZIONI
-  ValidateAlias = (alias) => {
+const // --> VALIDAZIONI private
+  validateAlias = (alias) => {
     const trimmedAlias = (alias || '').trim();
     if (trimmedAlias.length === 0) {
-      throw new Error(Format('Alias cannot be empty'));
+      throw new PulsorError(F('Alias cannot be empty'));
     }
     return trimmedAlias;
   },
-  ValidatePulse = (pulse) => {
+  validatePulse = (pulse) => {
     if (typeof pulse !== 'function') {
-      throw new Error(Format('Pulse/Async must be a function'));
+      throw new PulsorError(F('Pulser/Async must be a function'));
     }
     return pulse;
   };
 
-const // --> METODI
-  GetPulser = (aliasValidated, pulsersDb) => {
-    return pulsersDb.find((pulsor) => pulsor.alias === aliasValidated);
+const // --> METODI privati
+  getPulser = (aliasValidated, securePulsersDb) => {
+    return securePulsersDb.find((pulsor) => pulsor.alias === aliasValidated);
   },
-  PulserExists = (aliasValidated) => {
-    return GetPulser(aliasValidated, Pulsers) !== undefined;
+  pulserExists = (aliasValidated, securePulsersDb) => {
+    return getPulser(aliasValidated, securePulsersDb) !== undefined;
   },
-  PulserAsyncExists = (aliasValidated) => {
-    return GetPulser(aliasValidated, PulsersAsync) !== undefined;
+  createPulser = (aliasValidated, pulseValidated) => {
+    return {
+      alias: aliasValidated,
+      pulse: pulseValidated
+    };
+  },
+  createAndAddPulser = (alias, pulse, securePulsersDb) => {
+    const
+      aliasValidated = validateAlias(alias),
+      pulseValidated = validatePulse(pulse);
+
+    if (pulserExists(aliasValidated, securePulsersDb)) {
+      throw new PulsorError(F(`Pulser '${aliasValidated}' already exists`));
+    }
+
+    securePulsersDb.push(createPulser(aliasValidated, pulseValidated));
+    Loggy.log(`Pulser '${aliasValidated}' created`);
+  },
+  destroyPulser = (alias, securePulsersDb) => {
+    const
+      aliasValidated = validateAlias(alias);
+
+    if (!pulserExists(aliasValidated, securePulsersDb)) {
+      throw new PulsorError(F(`Pulser '${aliasValidated}' does not exist`));
+    }
+
+    const
+      pulserIndex = securePulsersDb.findIndex((pulsor) => pulsor.alias === aliasValidated);
+    securePulsersDb.splice(pulserIndex, 1);
+
+    Loggy.log(`Pulser '${aliasValidated}' destroyed`);
   };
 
 const // --> METODI ESPORTATI
-  Create = (alias, pulse) => {
+  CreatePulser = (alias, pulse) => {
 
-    const
-      aliasValidated = ValidateAlias(alias),
-      pulseValidated = ValidatePulse(pulse);
-
-    if (PulserExists(aliasValidated)) {
-      throw new Error(Format(`Pulser '${aliasValidated}' already exists`));
-    }
-    Pulsers.push(new PulseClass(aliasValidated, pulseValidated, LoggerServices));
-
-    Loggy.log(`Pulser '${aliasValidated}' created`);
+    createAndAddPulser(alias, pulse, Pulsers);
 
   },
-  Destroy = (alias) => {
+  DestroyPulser = (alias) => {
 
-    const
-      aliasValidated = ValidateAlias(alias),
-      pulserIndex = Pulsers.findIndex((pulsor) => pulsor.alias === aliasValidated);
-
-    if (pulserIndex === -1) {
-      throw new Error(Format(`Pulser '${aliasValidated}' does not exist`));
-    }
-    Pulsers.splice(pulserIndex, 1);
-
-    Loggy.log(`Pulser '${aliasValidated}' destroyed`);
+    destroyPulser(alias, Pulsers);
 
   },
-  CreateAsync = (alias, pulseAsync) => {
+  CreatePulserAsync = (alias, pulseAsync) => {
 
-    const
-      aliasValidated = ValidateAlias(alias),
-      pulseAsyncValidated = ValidatePulse(pulseAsync);
-
-    if (PulserAsyncExists(aliasValidated)) {
-      throw new Error(Format(`PulserAsync '${aliasValidated}' already exists`));
-    }
-    PulsersAsync.push(new PulseAsyncClass(aliasValidated, pulseAsyncValidated, LoggerServices));
-
-    Loggy.log(`PulserAsync '${aliasValidated}' created`);
+    createAndAddPulser(alias, pulseAsync, PulsersAsync);
 
   },
-  DestroyAsync = (alias) => {
+  DestroyPulserAsync = (alias) => {
 
-    const
-      aliasValidated = ValidateAlias(alias),
-      pulserAsyncIndex = PulsersAsync.findIndex((pulsor) => pulsor.alias === aliasValidated);
-
-    if (pulserAsyncIndex === -1) {
-      throw new Error(Format(`PulserAsync '${aliasValidated}' does not exist`));
-    }
-    PulsersAsync.splice(pulserAsyncIndex, 1);
-
-    Loggy.log(`PulserAsync '${aliasValidated}' destroyed`);
+    destroyPulser(alias, PulsersAsync);
 
   },
-  Pulse = (alias, ...args) => {
+  Pulsor = function (alias) {
 
-    const
-      aliasValidated = ValidateAlias(alias),
-      pulser = GetPulser(aliasValidated, Pulsers);
-    if (pulser === undefined) {
-      throw new Error(Format(`Pulser '${aliasValidated}' does not exist`));
-    }
-    return pulser.emit(...args);
+    const aliasValidated = validateAlias(alias);
 
-  },
-  PulseAsync = async (alias, ...args) => {
+    this.Pulse = (...args) => {
 
-    const
-      aliasValidated = ValidateAlias(alias),
-      pulserAsync = GetPulser(aliasValidated, PulsersAsync);
-    if (pulserAsync === undefined) {
-      throw new Error(Format(`PulserAsync '${aliasValidated}' does not exist`));
-    }
-    return await pulserAsync.emit(...args);
+      const pulsor = getPulser(aliasValidated, Pulsers);
+      if (pulsor === undefined) {
+        throw new PulsorError(F(`Pulser '${aliasValidated}' does not exist`));
+      }
+      return pulsor.pulse(...args);
 
+    };
+
+    this.PulseAsync = async (...args) => {
+
+      const pulsorAsync = getPulser(aliasValidated, PulsersAsync);
+      if (pulsorAsync === undefined) {
+        throw new PulsorError(F(`PulserAsync '${aliasValidated}' does not exist`));
+      }
+      return await pulsorAsync.pulse(...args);
+
+    };
   };
 
-export { Create, Destroy, CreateAsync, DestroyAsync, Pulse, PulseAsync };
+
+export { CreatePulser, DestroyPulser, CreatePulserAsync, DestroyPulserAsync, Pulsor };
