@@ -6,7 +6,7 @@
  * complete with a powerful callback system. The design emphasizes simplicity,
  * performance, and maintainability.
  *
- * @version 2.1.0
+ * @version 2.1.1
  * @example
  * import { CreatePulser, Pulser } from './pulsor.refactored.js';
  *
@@ -198,9 +198,10 @@ export const CreatePulser = (alias, pulseFn, options = {}) => {
   }
 
   // Auto-detect async if not specified
+  // Support both AsyncFunction and AsyncGeneratorFunction
   const isAsyncResolved = isAsync !== undefined
     ? isAsync
-    : pulseValidated.constructor.name === 'AsyncFunction';
+    : ['AsyncFunction', 'AsyncGeneratorFunction'].includes(pulseValidated.constructor.name);
 
   Registry[aliasValidated] = createPulserEntry(pulseValidated, isAsyncResolved);
 
