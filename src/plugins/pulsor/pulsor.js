@@ -70,6 +70,9 @@ const // --> VALIDAZIONI private
       throw new PulsorError(F('Callback/CallbackAsync must be a function'));
     }
     return callback;
+  },
+  validateCallbackItems = (callbackItems) => {
+    if (callbackItems === undefined || !Array.isArray(callbackItems)) callbackItems = [];
   };
 
 const // --> METODI privati
@@ -108,6 +111,9 @@ const // --> METODI ESPORTATI
     const pulseValidated = validatePulse(pulse);
 
     createPulser(aliasValidated, pulseValidated, Pulsers, override);
+    if (Callbacks[aliasValidated] === undefined) {
+      Callbacks[aliasValidated] = [];
+    }
 
   },
   DestroyPulser = (alias) => {
@@ -121,6 +127,10 @@ const // --> METODI ESPORTATI
     const aliasValidated = validateAlias(alias);
     const pulseAsyncValidated = validatePulse(pulseAsync);
     createPulser(aliasValidated, pulseAsyncValidated, PulsersAsync, override);
+
+    if (CallbacksAsync[aliasValidated] === undefined) {
+      CallbacksAsync[aliasValidated] = [];
+    }
 
   },
   DestroyPulserAsync = (alias) => {
@@ -139,7 +149,10 @@ const // --> METODI ESPORTATI
       if (pulsor === undefined) {
         throw new PulsorError(F(`Pulser '${aliasValidated}' does not exist`));
       }
-      return pulsor.pulse(...args);
+      const result = pulsor.pulse(...args);
+      const callbackItems = validateCallbackItems(Callbacks[aliasValidated]);
+      callbackItems.forEach(callback => callback(...args));
+      return result;
 
     };
 
@@ -149,19 +162,19 @@ const // --> METODI ESPORTATI
       if (pulsorAsync === undefined) {
         throw new PulsorError(F(`PulserAsync '${aliasValidated}' does not exist`));
       }
-      return await pulsorAsync.pulse(...args);
+      const result = await pulsorAsync.pulse(...args);
+      const callbackItems = validateCallbackItems(CallbacksAsync[aliasValidated]);
+      await Promise.all(callbackItems.map(callback => callback(...args)));
+      return result;
 
     };
 
     this.BindPulse = (callback) => {
       const callbackValidated = validateCallback(callback);
 
-      if (Callbacks[aliasValidated] === undefined || !Array.isArray(Callbacks[aliasValidated])) {
-        Callbacks[aliasValidated] = [];
-      }
-
+      validateCallbackItems(Callbacks[aliasValidated]);
       if (Callbacks[aliasValidated].includes(callbackValidated)) {
-        throw new PulsorError(F(`Callback '${callbackValidated.name}' already bound to '${aliasValidated}'`));
+        throw new PulsorError(F(`Callback already bound to '${aliasValidated}'`));
       }
 
       Callbacks[aliasValidated].push(callbackValidated);
@@ -171,12 +184,9 @@ const // --> METODI ESPORTATI
     this.BindPulseAsync = (callbackAsync) => {
       const callbackAsyncValidated = validateCallback(callbackAsync);
 
-      if (CallbacksAsync[aliasValidated] === undefined || !Array.isArray(CallbacksAsync[aliasValidated])) {
-        CallbacksAsync[aliasValidated] = [];
-      }
-
+      validateCallbackItems(CallbacksAsync[aliasValidated]);
       if (CallbacksAsync[aliasValidated].includes(callbackAsyncValidated)) {
-        throw new PulsorError(F(`CallbackAsync '${callbackAsyncValidated.name}' already bound to '${aliasValidated}'`));
+        throw new PulsorError(F(`CallbackAsync already bound to '${aliasValidated}'`));
       }
 
       CallbacksAsync[aliasValidated].push(callbackAsyncValidated);
