@@ -111,9 +111,7 @@ const // --> METODI ESPORTATI
     const pulseValidated = validatePulse(pulse);
 
     createPulser(aliasValidated, pulseValidated, Pulsers, override);
-    if (Callbacks[aliasValidated] === undefined) {
-      Callbacks[aliasValidated] = [];
-    }
+    validateCallbackItems(Callbacks[aliasValidated]);
 
   },
   DestroyPulser = (alias) => {
@@ -126,11 +124,9 @@ const // --> METODI ESPORTATI
 
     const aliasValidated = validateAlias(alias);
     const pulseAsyncValidated = validatePulse(pulseAsync);
-    createPulser(aliasValidated, pulseAsyncValidated, PulsersAsync, override);
 
-    if (CallbacksAsync[aliasValidated] === undefined) {
-      CallbacksAsync[aliasValidated] = [];
-    }
+    createPulser(aliasValidated, pulseAsyncValidated, PulsersAsync, override);
+    validateCallbackItems(CallbacksAsync[aliasValidated]);
 
   },
   DestroyPulserAsync = (alias) => {
