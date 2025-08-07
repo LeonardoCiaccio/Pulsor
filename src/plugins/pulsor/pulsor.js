@@ -1,29 +1,6 @@
 
 /**
  * Pulsor module
- *
- *  const handleMyPulser = (test) => {
- *    console.log('Questo è il test: ', test);
- *  }
- *
- *  CreatePulser('click pulsante nero', handleMyPulser);
- *
- *  Pulsor('click pulsante nero').Pulse('Hello World');
- *
- *  Pulsor('click pulsante nero').BindPulse(anotherHandleMyPulser);
- *  Pulsor('click pulsante nero').UnBindPulse(anotherHandleMyPulser);
- *
- *  const handleMyPulserAsync = async (test) => {
- *    await new Promise(resolve => setTimeout(resolve, 1000));
- *    console.log('Questo è il test: ', test);
- *  }
- *
- *  CreatePulserAsync('click pulsante nero', handleMyPulserAsync);
- *
- *  await Pulsor('click pulsante nero').PulseAsync('Hello World');
- *
- *  Pulsor('click pulsante nero').BindPulseAsync(anotherHandleMyPulserAsync);
- *  Pulsor('click pulsante nero').UnBindPulseAsync(anotherHandleMyPulserAsync);
  */
 
 import { Logger } from './logger.class.js';
