@@ -145,7 +145,7 @@ const // --> METODI ESPORTATI
       if (pulsor === undefined) {
         throw new PulsorError(F(`Pulser '${aliasValidated}' does not exist`));
       }
-      const result = pulsor.pulse(...args);
+      const result = pulsor(...args);
       const callbackItems = validateCallbackItems(Callbacks[aliasValidated]);
       callbackItems.forEach(callback => callback(...args));
       return result;
@@ -158,7 +158,7 @@ const // --> METODI ESPORTATI
       if (pulsorAsync === undefined) {
         throw new PulsorError(F(`PulserAsync '${aliasValidated}' does not exist`));
       }
-      const result = await pulsorAsync.pulse(...args);
+      const result = await pulsorAsync(...args);
       const callbackItems = validateCallbackItems(CallbacksAsync[aliasValidated]);
       await Promise.all(callbackItems.map(callback => callback(...args)));
       return result;
