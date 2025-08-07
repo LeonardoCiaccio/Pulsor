@@ -1,6 +1,29 @@
 
 /**
  * Pulsor module
+ *
+ *  const handleMyPulser = (test) => {
+ *    console.log('Questo è il test: ', test);
+ *  }
+ *
+ *  CreatePulser('click pulsante nero', handleMyPulser);
+ *
+ *  Pulsor('click pulsante nero').Pulse('Hello World');
+ *
+ *  Pulsor('click pulsante nero').BindPulse(anotherHandleMyPulser);
+ *  Pulsor('click pulsante nero').UnBindPulse(anotherHandleMyPulser);
+ *
+ *  const handleMyPulserAsync = async (test) => {
+ *    await new Promise(resolve => setTimeout(resolve, 1000));
+ *    console.log('Questo è il test: ', test);
+ *  }
+ *
+ *  CreatePulserAsync('click pulsante nero', handleMyPulserAsync);
+ *
+ *  await Pulsor('click pulsante nero').PulseAsync('Hello World');
+ *
+ *  Pulsor('click pulsante nero').BindPulseAsync(anotherHandleMyPulserAsync);
+ *  Pulsor('click pulsante nero').UnBindPulseAsync(anotherHandleMyPulserAsync);
  */
 
 import { Logger } from './logger.class.js';
@@ -130,36 +153,54 @@ const // --> METODI ESPORTATI
 
     };
 
-    this.on = (callback) => {
+    this.BindPulse = (callback) => {
       const callbackValidated = validateCallback(callback);
+
+      if (Callbacks[aliasValidated] === undefined || !Array.isArray(Callbacks[aliasValidated])) {
+        Callbacks[aliasValidated] = [];
+      }
+
+      if (Callbacks[aliasValidated].includes(callbackValidated)) {
+        throw new PulsorError(F(`Callback '${callbackValidated.name}' already bound to '${aliasValidated}'`));
+      }
+
       Callbacks[aliasValidated].push(callbackValidated);
       Loggy.log(`Callback added to '${aliasValidated}'`);
     };
 
-    this.onAsync = (callbackAsync) => {
+    this.BindPulseAsync = (callbackAsync) => {
       const callbackAsyncValidated = validateCallback(callbackAsync);
+
+      if (CallbacksAsync[aliasValidated] === undefined || !Array.isArray(CallbacksAsync[aliasValidated])) {
+        CallbacksAsync[aliasValidated] = [];
+      }
+
+      if (CallbacksAsync[aliasValidated].includes(callbackAsyncValidated)) {
+        throw new PulsorError(F(`CallbackAsync '${callbackAsyncValidated.name}' already bound to '${aliasValidated}'`));
+      }
+
       CallbacksAsync[aliasValidated].push(callbackAsyncValidated);
       Loggy.log(`CallbackAsync added to '${aliasValidated}'`);
     };
 
-    this.off = (callback) => {
+    this.UnbindPulse = (callback) => {
       const callbackValidated = validateCallback(callback);
       Callbacks[aliasValidated] = Callbacks[aliasValidated].filter((c) => c !== callbackValidated);
       Loggy.log(`Callback removed from '${aliasValidated}'`);
     };
 
-    this.offAsync = (callbackAsync) => {
+    this.UnbindPulseAsync = (callbackAsync) => {
       const callbackAsyncValidated = validateCallback(callbackAsync);
       CallbacksAsync[aliasValidated] = CallbacksAsync[aliasValidated].filter((c) => c !== callbackAsyncValidated);
       Loggy.log(`CallbackAsync removed from '${aliasValidated}'`);
     };
 
-    this.offAll = () => {
+    this.UnbindAllPulses = () => {
       delete Callbacks[aliasValidated];
       Loggy.log(`All callbacks removed from '${aliasValidated}'`);
     };
 
-    this.offAllAsync = () => {
+    this.UnbindAllPulsesAsync = () => {
       delete CallbacksAsync[aliasValidated];
       Loggy.log(`All callbacksAsync removed from '${aliasValidated}'`);
     };
