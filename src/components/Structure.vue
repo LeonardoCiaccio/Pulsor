@@ -30,10 +30,16 @@
           <component v-if="currentComponent" :is="currentComponent" />
           <!-- Default content when no component is loaded -->
           <div v-else class="text-center py-12">
-            <h2 class="text-2xl font-semibold text-gray-700 mb-4">Seleziona un'area</h2>
-            <p class="text-gray-600">
-              Usa i pulsanti della sidebar per caricare un componente nell'area di lavoro
+            <h2 class="text-2xl font-semibold text-gray-700 mb-4">Pulsor Dashboard</h2>
+            <p class="text-gray-600 mb-6">
+              Select an example from the sidebar to explore Pulsor's powerful features
             </p>
+            <div class="bg-blue-50 p-6 rounded-lg max-w-2xl mx-auto">
+              <h3 class="text-lg font-semibold text-blue-800 mb-3">🚀 Welcome to Pulsor</h3>
+              <p class="text-blue-700 text-sm leading-relaxed">
+                Pulsor is a unified, event-driven function execution system that provides a powerful API for managing named function executors with callback systems, async support, and real-time communication.
+              </p>
+            </div>
           </div>
         </slot>
       </div>
@@ -50,13 +56,29 @@ import { onMounted, onUnmounted, shallowRef, defineAsyncComponent } from 'vue'
 const currentComponent = shallowRef(null)
 
 // Lazy load components
-const Example1 = defineAsyncComponent(() => import('./Example1.vue'))
-const Example2 = defineAsyncComponent(() => import('./Example2.vue'))
+const BasicPulser = defineAsyncComponent(() => import('./examples/BasicPulser.vue'))
+const AsyncOperations = defineAsyncComponent(() => import('./examples/AsyncOperations.vue'))
+const CallbackSystem = defineAsyncComponent(() => import('./examples/CallbackSystem.vue'))
+const EventCommunication = defineAsyncComponent(() => import('./examples/EventCommunication.vue'))
+const DataProcessing = defineAsyncComponent(() => import('./examples/DataProcessing.vue'))
+const RealTimeUpdates = defineAsyncComponent(() => import('./examples/RealTimeUpdates.vue'))
+const FormValidation = defineAsyncComponent(() => import('./examples/FormValidation.vue'))
+const ApiIntegration = defineAsyncComponent(() => import('./examples/ApiIntegration.vue'))
+const StateManagement = defineAsyncComponent(() => import('./examples/StateManagement.vue'))
+const PerformanceMonitoring = defineAsyncComponent(() => import('./examples/PerformanceMonitoring.vue'))
 
 // Component mapping
 const componentMap = {
-  example1: Example1,
-  example2: Example2,
+  'basic-pulser': BasicPulser,
+  'async-operations': AsyncOperations,
+  'callback-system': CallbackSystem,
+  'event-communication': EventCommunication,
+  'data-processing': DataProcessing,
+  'real-time-updates': RealTimeUpdates,
+  'form-validation': FormValidation,
+  'api-integration': ApiIntegration,
+  'state-management': StateManagement,
+  'performance-monitoring': PerformanceMonitoring,
 }
 
 const handleShowArea = (areaName) => {
@@ -75,7 +97,7 @@ const pulsorSidebarLoaded = Pulsor('sidebar:loaded')
 
 onMounted(() => {
   pulsorSidebarLoaded.pulse('Structure.vue')
-  pulsorShowArea.bind(handleShowArea).pulse('example2')
+  pulsorShowArea.bind(handleShowArea)
 })
 
 // Unbind the event listener when the component is unmounted

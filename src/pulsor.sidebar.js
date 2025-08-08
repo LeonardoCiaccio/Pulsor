@@ -15,14 +15,54 @@ const PULSE_RENDERED_SIDEBAR = 'sidebar:loaded';
 // Configuration array for sidebar buttons
 const sideBarButtons = [
   {
-    area: 'example1',
-    classes: ['sidebar-button'], // CSS classes to apply
-    label: 'Example 1' // Button text
+    area: 'basic-pulser',
+    classes: ['sidebar-button'],
+    label: 'Basic Pulser'
   },
   {
-    area: 'example2',
-    classes: ['sidebar-button'], // CSS classes to apply
-    label: 'Example 2' // Button text
+    area: 'async-operations',
+    classes: ['sidebar-button'],
+    label: 'Async Operations'
+  },
+  {
+    area: 'callback-system',
+    classes: ['sidebar-button'],
+    label: 'Callback System'
+  },
+  {
+    area: 'event-communication',
+    classes: ['sidebar-button'],
+    label: 'Event Communication'
+  },
+  {
+    area: 'data-processing',
+    classes: ['sidebar-button'],
+    label: 'Data Processing'
+  },
+  {
+    area: 'real-time-updates',
+    classes: ['sidebar-button'],
+    label: 'Real-time Updates'
+  },
+  {
+    area: 'form-validation',
+    classes: ['sidebar-button'],
+    label: 'Form Validation'
+  },
+  {
+    area: 'api-integration',
+    classes: ['sidebar-button'],
+    label: 'API Integration'
+  },
+  {
+    area: 'state-management',
+    classes: ['sidebar-button'],
+    label: 'State Management'
+  },
+  {
+    area: 'performance-monitoring',
+    classes: ['sidebar-button'],
+    label: 'Performance Monitor'
   }
 ];
 
