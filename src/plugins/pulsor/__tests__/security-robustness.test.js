@@ -114,8 +114,6 @@ describe('Security and Robustness Tests', () => {
 
     it('should validate function parameters thoroughly', () => {
       const invalidFunctions = [
-        null,
-        undefined,
         'string-not-function',
         123,
         {},
@@ -126,6 +124,15 @@ describe('Security and Robustness Tests', () => {
 
       invalidFunctions.forEach(invalidFn => {
         expect(() => CreatePulser('test-invalid', invalidFn)).toThrow();
+      });
+
+      // Test that null/undefined are now accepted and converted to no-op functions
+      const nullUndefinedFunctions = [null, undefined];
+      nullUndefinedFunctions.forEach((nullishFn, index) => {
+        const alias = `test-nullish-${index}`;
+        expect(() => CreatePulser(alias, nullishFn)).not.toThrow();
+        const pulser = new Pulser(alias);
+        expect(pulser.pulse()).toBeUndefined(); // no-op function returns undefined
       });
     });
 

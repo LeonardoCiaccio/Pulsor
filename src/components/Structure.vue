@@ -36,11 +36,11 @@
 
 <script setup>
 // Quando montato richiamo il pulsor loaded
-import { Pulser } from '@/plugins/pulsor/pulsor.js'
+import { Pulsor } from '@/plugins/pulsor/pulsor.js'
 import { onMounted } from 'vue'
 
 onMounted(() => {
-  new Pulser('sidebar:loaded').pulse()
+  Pulsor('sidebar:loaded').pulse('Structure.vue')
 })
 </script>
 

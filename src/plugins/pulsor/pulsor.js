@@ -6,7 +6,7 @@
  * complete with a powerful callback system. The design emphasizes simplicity,
  * performance, and maintainability.
  *
- * @version 2.2.5
+ * @version 2.2.7
  * @example
  * import { CreatePulser, Pulser } from './pulsor.refactored.js';
  *
@@ -52,9 +52,6 @@ const Registry = Object.create(null);
 
 const LoggerServices = { log: true, error: true, warn: true, debug: false, info: true };
 const Loggy = new Logger(Prefix, LoggerServices);
-const F = (message) => {
-  Loggy.format(message);
-};
 
 // Cache for validated aliases to avoid repeated validation
 const aliasCache = new Map();
@@ -71,7 +68,7 @@ const ALIAS_CACHE_MAX_SIZE = 100; // Prevent memory leaks
  */
 const validateAlias = (alias) => {
   if (typeof alias !== 'string') {
-    throw new PulsorError(F('Alias must be a string.'));
+    throw new PulsorError(Loggy.format('Alias must be a string.'));
   }
 
   // Check cache first
@@ -81,7 +78,7 @@ const validateAlias = (alias) => {
 
   const trimmedAlias = alias.trim();
   if (trimmedAlias.length === 0 || trimmedAlias.length > 32) {
-    throw new PulsorError(F('Alias cannot be empty or longer than 32 characters.'));
+    throw new PulsorError(Loggy.format('Alias cannot be empty or longer than 32 characters.'));
   }
 
   // Cache the result (with size limit)
@@ -96,17 +93,41 @@ const validateAlias = (alias) => {
 };
 
 /**
- * Validates that the provided pulse is a function.
- * @param {Function} fn - The function to validate.
- * @param {string} type - The type name for error messages.
- * @returns {Function} The validated function.
- * @throws {PulsorError} If fn is not a function.
+ * Validates and normalizes function inputs for Pulsor operations.
+ * This function provides defensive programming by handling edge cases gracefully.
+ * 
+ * @param {Function|null|undefined} fn - The function to validate and normalize.
+ * @param {string} [type='Function'] - The type name used in error messages for better debugging.
+ * @returns {Function} A validated function - either the original or a safe no-op function.
+ * @throws {PulsorError} If fn is not a function, null, or undefined.
+ * 
+ * @example
+ * // Valid function passes through unchanged
+ * const validFn = validateFunction(() => 'hello');
+ * 
+ * @example
+ * // null/undefined becomes a no-op function
+ * const noOpFn = validateFunction(null); // Returns () => {}
+ * 
+ * @example
+ * // Invalid types throw errors
+ * validateFunction('not a function'); // Throws PulsorError
+ * 
  * @private
  */
 const validateFunction = (fn, type = 'Function') => {
-  if (typeof fn !== 'function') {
-    throw new PulsorError(F(`${type} must be a function.`));
+  // Handle null/undefined gracefully by providing a safe no-op function
+  // This prevents runtime errors when optional functions are not provided
+  if (fn === null || fn === undefined) {
+    fn = () => { }; // Return empty function as safe default
+  } 
+  // Strict type checking for all other values
+  // This ensures type safety and prevents unexpected behavior
+  else if (typeof fn !== 'function') {
+    throw new PulsorError(Loggy.format(`${type} must be a function.`));
   }
+  
+  // Return the validated/normalized function
   return fn;
 };
 
@@ -198,7 +219,7 @@ export const CreatePulser = (alias, pulseFn, options = {}) => {
     if (override) {
       Loggy.log(`Pulser '${aliasValidated}' already exists. Overriding.`);
     } else {
-      throw new PulsorError(F(`Pulser '${aliasValidated}' already exists. Use { override: true } to replace it.`));
+      throw new PulsorError(Loggy.format(`Pulser '${aliasValidated}' already exists. Use { override: true } to replace it.`));
     }
   }
 
@@ -227,7 +248,7 @@ export const CreatePulser = (alias, pulseFn, options = {}) => {
 export const DestroyPulser = (alias) => {
   const aliasValidated = validateAlias(alias);
   if (!(aliasValidated in Registry)) {
-    throw new PulsorError(F(`Pulser '${aliasValidated}' does not exist.`));
+    throw new PulsorError(Loggy.format(`Pulser '${aliasValidated}' does not exist.`));
   }
 
   delete Registry[aliasValidated];
@@ -340,7 +361,7 @@ export class Pulser {
     this.#entry = Registry[this.#alias];
 
     if (!this.#entry) {
-      throw new PulsorError(F(`Cannot create Pulsor instance. Pulser '${this.#alias}' is not registered.`));
+      throw new PulsorError(Loggy.format(`Cannot create Pulsor instance. Pulser '${this.#alias}' is not registered.`));
     }
   }
 
@@ -426,7 +447,7 @@ export class Pulser {
   bind(callback) {
     validateFunction(callback, 'Callback');
     if (this.#entry.callbacks.has(callback)) {
-      throw new PulsorError(F(`Callback is already bound to '${this.#alias}'.`));
+      throw new PulsorError(Loggy.format(`Callback is already bound to '${this.#alias}'.`));
     }
 
     this.#entry.callbacks.add(callback);

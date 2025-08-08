@@ -1,16 +1,21 @@
+/* eslint-disable no-unused-vars */
 
 // Import Pulsor system for event management
 import { CreatePulser } from '@/plugins/pulsor/pulsor.js';
 
 // DOM element ID where buttons will be added
 const SIDEBAR_ID = 'sidebar-buttons';
+const WORK_AREA = 'work-area';
+
+
 // Event name triggered when sidebar is loaded
 const PULSE_RENDERED_SIDEBAR = 'sidebar:loaded';
+
 
 // Configuration array for sidebar buttons
 const sideBarButtons = [
   {
-    classes: ['sidebar-button'], // CSS classes to apply
+    classes: ['sidebar-button', 'show-area-1'], // CSS classes to apply
     label: 'Example 1' // Button text
   }
 ];
@@ -33,7 +38,7 @@ function initializeSidebarEvents() {
   console.log('Initializing sidebar events');
 
   // Create pulser for sidebar loaded event and bind callbacks
-  CreatePulser(PULSE_RENDERED_SIDEBAR, () => console.log('Pulsed Sidebar loaded'))
+  CreatePulser(PULSE_RENDERED_SIDEBAR, (moduleName) => console.log('Pulsed Sidebar loaded from: ', moduleName))
     .bind(() => {
       // First callback: install all configured buttons
       sideBarButtons.forEach(button => {
@@ -43,6 +48,12 @@ function initializeSidebarEvents() {
       // Second callback: log completion message
       console.log('Message example for sidebar buttons installed');
     });
+
+  CreatePulser('show:area', (areaName) => {
+
+    return areaName;
+
+  });
 };
 
 // Export both named and default

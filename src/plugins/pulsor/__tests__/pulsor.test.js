@@ -149,9 +149,17 @@ describe('Pulsor Module', () => {
       });
 
       it.each([
-        'not-a-function', 123, null, undefined, {}
+        'not-a-function', 123, {}
       ])('should throw error for invalid function: %p', (pulseFn) => {
         expect(() => CreatePulser('invalid-fn', pulseFn)).toThrow();
+      });
+
+      it.each([
+        [null, 'null-fn'], [undefined, 'undefined-fn']
+      ])('should accept null/undefined and convert to no-op function: %p', (pulseFn, alias) => {
+        expect(() => CreatePulser(alias, pulseFn)).not.toThrow();
+        const pulser = new Pulser(alias);
+        expect(pulser.pulse()).toBeUndefined(); // no-op function returns undefined
       });
 
       it('should trim whitespace from alias', () => {
