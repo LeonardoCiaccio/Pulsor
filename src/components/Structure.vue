@@ -71,9 +71,10 @@ const handleShowArea = (areaName) => {
 }
 
 const pulsorShowArea = Pulsor('show:area')
+const pulsorSidebarLoaded = Pulsor('sidebar:loaded')
 
 onMounted(() => {
-  Pulsor('sidebar:loaded').pulse('Structure.vue')
+  pulsorSidebarLoaded.pulse('Structure.vue')
   pulsorShowArea.bind(handleShowArea).pulse('example2')
 })
 
