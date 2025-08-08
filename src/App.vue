@@ -6,21 +6,4 @@ import Structure from '@/components/Structure.vue'
   <Structure />
 </template>
 
-<style>
-/* Global styles */
-* {
-  margin: 0;
-  padding: 0;
-  box-sizing: border-box;
-}
-
-body {
-  font-family:
-    'Inter',
-    -apple-system,
-    BlinkMacSystemFont,
-    'Segoe UI',
-    Roboto,
-    sans-serif;
-}
-</style>
+<style></style>
