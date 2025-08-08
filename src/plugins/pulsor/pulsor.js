@@ -95,24 +95,24 @@ const validateAlias = (alias) => {
 /**
  * Validates and normalizes function inputs for Pulsor operations.
  * This function provides defensive programming by handling edge cases gracefully.
- * 
+ *
  * @param {Function|null|undefined} fn - The function to validate and normalize.
  * @param {string} [type='Function'] - The type name used in error messages for better debugging.
  * @returns {Function} A validated function - either the original or a safe no-op function.
  * @throws {PulsorError} If fn is not a function, null, or undefined.
- * 
+ *
  * @example
  * // Valid function passes through unchanged
  * const validFn = validateFunction(() => 'hello');
- * 
+ *
  * @example
  * // null/undefined becomes a no-op function
  * const noOpFn = validateFunction(null); // Returns () => {}
- * 
+ *
  * @example
  * // Invalid types throw errors
  * validateFunction('not a function'); // Throws PulsorError
- * 
+ *
  * @private
  */
 const validateFunction = (fn, type = 'Function') => {
@@ -120,13 +120,13 @@ const validateFunction = (fn, type = 'Function') => {
   // This prevents runtime errors when optional functions are not provided
   if (fn === null || fn === undefined) {
     fn = () => { }; // Return empty function as safe default
-  } 
+  }
   // Strict type checking for all other values
   // This ensures type safety and prevents unexpected behavior
   else if (typeof fn !== 'function') {
     throw new PulsorError(Loggy.format(`${type} must be a function.`));
   }
-  
+
   // Return the validated/normalized function
   return fn;
 };
@@ -453,7 +453,7 @@ export class Pulser {
     this.#entry.callbacks.add(callback);
     Loggy.log(`Callback added to '${this.#alias}'.`);
     return this;
-  }
+  };
 
   /**
    * Unbinds a specific callback function.
@@ -471,7 +471,60 @@ export class Pulser {
       Loggy.log(`Callback removed from '${this.#alias}'.`);
     }
     return wasRemoved;
-  }
+  };
+
+  /**
+   * Binds multiple callback functions that will be executed after the main pulser function.
+   * Each callback in the array will be bound individually.
+   * @param {Function[]} callbacks - Array of callback functions to bind.
+   * @throws {PulsorError} If any callback is not a function or is already bound.
+   *
+   * @example
+   * const callbacks = [
+   *   (...args) => console.log('First callback:', args),
+   *   (...args) => console.log('Second callback:', args)
+   * ];
+   * myPulsor.binds(callbacks);
+   */
+  binds(callbacks) {
+    if (!Array.isArray(callbacks)) {
+      throw new PulsorError(Loggy.format(`Expected array of callbacks for '${this.#alias}', got ${typeof callbacks}.`));
+    }
+    
+    callbacks.forEach((callback, index) => {
+      try {
+        this.bind(callback);
+      } catch (error) {
+        throw new PulsorError(Loggy.format(`Error binding callback at index ${index} for '${this.#alias}': ${error.message}`));
+      }
+    });
+    
+    return this;
+  };
+
+  /**
+   * Unbinds multiple callback functions.
+   * @param {Function[]} callbacks - Array of callback functions to unbind.
+   * @returns {number} Number of callbacks that were successfully removed.
+   *
+   * @example
+   * const removedCount = myPulsor.unbinds([callback1, callback2]);
+   * console.log(`Removed ${removedCount} callbacks`);
+   */
+  unbinds(callbacks) {
+    if (!Array.isArray(callbacks)) {
+      throw new PulsorError(Loggy.format(`Expected array of callbacks for '${this.#alias}', got ${typeof callbacks}.`));
+    }
+    
+    let removedCount = 0;
+    callbacks.forEach(callback => {
+      if (this.unbind(callback)) {
+        removedCount++;
+      }
+    });
+    
+    return removedCount;
+  };
 
   /**
    * Unbinds all callbacks from this pulser.

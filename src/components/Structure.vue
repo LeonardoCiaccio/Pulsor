@@ -6,7 +6,7 @@
       <div class="p-4 border-b border-gray-200">
         <h2 class="text-lg font-semibold text-gray-800">Sidebar</h2>
       </div>
-      <div id="sidebar-buttons" class="p-4">
+      <div id="sidebar-buttons" class="p-4 flex flex-col space-y-2">
         <slot name="sidebar">
           <!-- Default sidebar content -->
           <p class="text-gray-600">Sidebar content goes here</p>
@@ -26,8 +26,15 @@
       <!-- Content -->
       <div id="work-area" class="flex-1 p-6 overflow-auto">
         <slot name="content">
-          <!-- Default content -->
-          <p class="text-gray-600">Main content goes here</p>
+          <!-- Dynamic component area -->
+          <component v-if="currentComponent" :is="currentComponent" />
+          <!-- Default content when no component is loaded -->
+          <div v-else class="text-center py-12">
+            <h2 class="text-2xl font-semibold text-gray-700 mb-4">Seleziona un'area</h2>
+            <p class="text-gray-600">
+              Usa i pulsanti della sidebar per caricare un componente nell'area di lavoro
+            </p>
+          </div>
         </slot>
       </div>
     </div>
@@ -37,13 +44,44 @@
 <script setup>
 // Quando montato richiamo il pulsor loaded
 import { Pulsor } from '@/plugins/pulsor/pulsor.js'
-import { onMounted } from 'vue'
+import { onMounted, onUnmounted, shallowRef, defineAsyncComponent } from 'vue'
+
+// Dynamic component loading
+const currentComponent = shallowRef(null)
+
+// Lazy load components
+const Example1 = defineAsyncComponent(() => import('./Example1.vue'))
+const Example2 = defineAsyncComponent(() => import('./Example2.vue'))
+
+// Component mapping
+const componentMap = {
+  example1: Example1,
+  example2: Example2,
+}
+
+const handleShowArea = (areaName) => {
+  // Load the requested component dynamically
+  if (componentMap[areaName]) {
+    currentComponent.value = componentMap[areaName]
+    console.log(`[Structure] Loading area: ${areaName}`)
+  } else {
+    console.warn(`[Structure] Unknown area: ${areaName}`)
+    currentComponent.value = null
+  }
+}
+
+const pulsorShowArea = Pulsor('show:area')
 
 onMounted(() => {
   Pulsor('sidebar:loaded').pulse('Structure.vue')
+  pulsorShowArea.bind(handleShowArea)
+  pulsorShowArea.pulse('example1')
+})
+
+// Unbind the event listener when the component is unmounted
+onUnmounted(() => {
+  pulsorShowArea.unbind(handleShowArea)
 })
 </script>
 
-<style scoped>
-/* Additional styles if needed */
-</style>
+<style scoped></style>
