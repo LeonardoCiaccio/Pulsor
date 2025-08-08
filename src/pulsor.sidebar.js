@@ -40,6 +40,7 @@ const installButtonsToSidebar = (validatedSidebarId, buttonConfig) => {
   });
 
   Pulsor('show:area').bind((areaName) => {
+
     // Se areaName è uguale a buttonConfig.area
     if (areaName === buttonConfig.area) {
       // Aggiungi la classe active se non esiste già
@@ -70,6 +71,7 @@ function initializeSidebarEvents() {
       sideBarButtons.forEach(buttonConfig => {
         installButtonsToSidebar(SIDEBAR_ID, buttonConfig);
       });
+
     }).bind(() => {
       // Second callback: log completion message
       console.log('Message example for sidebar buttons installed');

@@ -74,8 +74,7 @@ const pulsorShowArea = Pulsor('show:area')
 
 onMounted(() => {
   Pulsor('sidebar:loaded').pulse('Structure.vue')
-  pulsorShowArea.bind(handleShowArea)
-  pulsorShowArea.pulse('example1')
+  pulsorShowArea.bind(handleShowArea).pulse('example2')
 })
 
 // Unbind the event listener when the component is unmounted
