@@ -97,6 +97,50 @@ describe('Pulsor Module', () => {
       expect(pulser.pulse()).toBe('second');
     });
 
+    it('should return a Pulser instance for immediate use', () => {
+      const returnedPulser = CreatePulser('return-test', () => 'immediate');
+      expect(returnedPulser).toBeInstanceOf(Pulser);
+      expect(returnedPulser.alias).toBe('return-test');
+      expect(returnedPulser.pulse()).toBe('immediate');
+    });
+
+    it('should return a working Pulser instance for async functions', async () => {
+      const returnedPulser = CreatePulser('async-return-test', async () => 'async-immediate', { isAsync: true });
+      expect(returnedPulser).toBeInstanceOf(Pulser);
+      expect(returnedPulser.alias).toBe('async-return-test');
+      expect(returnedPulser.isAsync).toBe(true);
+      await expect(returnedPulser.pulse()).resolves.toBe('async-immediate');
+    });
+
+    it('should return a Pulser instance that can bind callbacks immediately', () => {
+      const callback = vi.fn();
+      const returnedPulser = CreatePulser('callback-return-test', () => 'test');
+      
+      returnedPulser.bind(callback);
+      expect(returnedPulser.callbackCount).toBe(1);
+      
+      returnedPulser.pulse();
+      expect(callback).toHaveBeenCalled();
+    });
+
+    it('should return a Pulser instance with correct properties when overriding', () => {
+      CreatePulser('override-return-test', () => 'first');
+      const returnedPulser = CreatePulser('override-return-test', () => 'second', { override: true });
+      
+      expect(returnedPulser).toBeInstanceOf(Pulser);
+      expect(returnedPulser.alias).toBe('override-return-test');
+      expect(returnedPulser.pulse()).toBe('second');
+    });
+
+    it('should return a Pulser instance that matches manually created instance', () => {
+      const returnedPulser = CreatePulser('match-test', (x) => x * 2);
+      const manualPulser = new Pulser('match-test');
+      
+      expect(returnedPulser.alias).toBe(manualPulser.alias);
+      expect(returnedPulser.isAsync).toBe(manualPulser.isAsync);
+      expect(returnedPulser.pulse(5)).toBe(manualPulser.pulse(5));
+    });
+
     describe('Alias and Function Validation', () => {
       it.each([
         [123], [null], [undefined], [{}], [''], ['   '], ['a'.repeat(33)]

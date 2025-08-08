@@ -1,11 +1,26 @@
 <script setup>
-import HelloWorld from './PulsorExamples.vue'
+import Structure from './components/Structure.vue';
 </script>
 
 <template>
-  <HelloWorld />
+  <Structure />
 </template>
 
 <style>
-/* No specific styles needed for App.vue as HelloWorld.vue handles the layout */
+/* Global styles */
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  font-family:
+    'Inter',
+    -apple-system,
+    BlinkMacSystemFont,
+    'Segoe UI',
+    Roboto,
+    sans-serif;
+}
 </style>

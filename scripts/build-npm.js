@@ -17,6 +17,31 @@ const distDir = path.join(rootDir, 'dist-npm');
 const srcDir = path.join(rootDir, 'src', 'plugins', 'pulsor');
 
 /**
+ * Extract version from pulsor.js file
+ * @returns {string} Version string
+ */
+function extractVersionFromPulsor() {
+  console.log('🔍 Extracting version from pulsor.js...');
+  
+  const pulsorFilePath = path.join(srcDir, 'pulsor.js');
+  
+  if (!fs.existsSync(pulsorFilePath)) {
+    throw new Error('pulsor.js file not found');
+  }
+  
+  const pulsorContent = fs.readFileSync(pulsorFilePath, 'utf8');
+  const versionMatch = pulsorContent.match(/@version\s+(\d+\.\d+\.\d+)/);
+  
+  if (!versionMatch) {
+    throw new Error('Version not found in pulsor.js. Expected @version x.x.x format');
+  }
+  
+  const version = versionMatch[1];
+  console.log(`✅ Found version: ${version}`);
+  return version;
+}
+
+/**
  * Clean and create distribution directory
  */
 function setupDistDirectory() {
@@ -59,10 +84,12 @@ function copyModuleFiles() {
  */
 function createNpmPackageJson() {
   console.log('📄 Creating NPM package.json...');
+  
+  const version = extractVersionFromPulsor();
 
   const packageJson = {
     "name": "pulsor",
-    "version": "2.1.1",
+    "version": version,
     "description": "A lightweight and robust module for managing named function executors with unified API for sync/async operations",
     "main": "pulsor.js",
     "type": "module",

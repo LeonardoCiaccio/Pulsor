@@ -6,7 +6,7 @@
  * complete with a powerful callback system. The design emphasizes simplicity,
  * performance, and maintainability.
  *
- * @version 2.1.1
+ * @version 2.2.1
  * @example
  * import { CreatePulser, Pulser } from './pulsor.refactored.js';
  *
@@ -169,20 +169,23 @@ const executeCallbacksAsync = async (callbacks, args, alias) => {
  * @param {object} [options={}] - Configuration options for the pulser.
  * @param {boolean} [options.override=false] - If true, an existing pulser with the same alias will be overwritten.
  * @param {boolean} [options.isAsync] - If specified, forces async/sync mode. If not specified, auto-detects from function.
+ * @returns {Pulser} A new Pulser instance ready for immediate use.
  * @throws {PulsorError} If validation fails or if the pulser already exists and `override` is false.
  *
  * @example
- * // Synchronous pulser
- * CreatePulser('greeter', (name) => `Hello, ${name}!`);
+ * // Synchronous pulser - returns instance for immediate use
+ * const greeter = CreatePulser('greeter', (name) => `Hello, ${name}!`);
+ * const message = greeter.pulse('World'); // "Hello, World!"
  *
  * // Asynchronous pulser (auto-detected)
- * CreatePulser('delay', async (ms) => new Promise(res => setTimeout(res, ms)));
+ * const delay = CreatePulser('delay', async (ms) => new Promise(res => setTimeout(res, ms)));
+ * await delay.pulse(1000); // Waits 1 second
  *
  * // Force sync mode for async function
- * CreatePulser('forceSync', async () => 'immediate', { isAsync: false });
+ * const forceSync = CreatePulser('forceSync', async () => 'immediate', { isAsync: false });
  *
  * // Override an existing pulser
- * CreatePulser('greeter', (name) => `Hi, ${name}!`, { override: true });
+ * const newGreeter = CreatePulser('greeter', (name) => `Hi, ${name}!`, { override: true });
  */
 export const CreatePulser = (alias, pulseFn, options = {}) => {
   const { override = false, isAsync } = options;
@@ -206,6 +209,9 @@ export const CreatePulser = (alias, pulseFn, options = {}) => {
   Registry[aliasValidated] = createPulserEntry(pulseValidated, isAsyncResolved);
 
   Loggy.log(`Pulser '${aliasValidated}' (${isAsyncResolved ? 'async' : 'sync'}) created.`);
+
+  // Return an instantiated Pulser for immediate use
+  return new Pulser(aliasValidated);
 };
 
 /**
