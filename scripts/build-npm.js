@@ -88,7 +88,7 @@ function createNpmPackageJson() {
   const version = extractVersionFromPulsor();
 
   const packageJson = {
-    "name": "pulsor",
+    "name": "@leonardo_ciaccio/pulsor",
     "version": version,
     "description": "A lightweight and robust module for managing named function executors with unified API for sync/async operations",
     "main": "pulsor.js",
