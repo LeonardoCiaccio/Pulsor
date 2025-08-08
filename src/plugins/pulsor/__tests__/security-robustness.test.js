@@ -20,16 +20,22 @@ import {
 } from '../pulsor.js';
 
 // Mock Logger to avoid external dependencies
-vi.mock('./logger.class.js', () => ({
-  Logger: vi.fn().mockImplementation(() => ({
-    log: vi.fn(),
-    warn: vi.fn(),
-    error: vi.fn(),
-    debug: vi.fn(),
-    info: vi.fn(),
-    format: vi.fn(msg => msg)
-  }))
-}));
+import { Logger } from '../logger.class.js'; // Import the actual Logger class for typing/mocking
+
+vi.mock('../logger.class.js', async () => {
+  const actualLoggerModule = await vi.importActual('../logger.class.js');
+  return {
+    Logger: vi.fn().mockImplementation((...args) => {
+      const instance = new actualLoggerModule.Logger(...args);
+      instance.log = vi.fn();
+      instance.warn = vi.fn();
+      instance.error = vi.fn();
+      instance.debug = vi.fn();
+      instance.info = vi.fn();
+      return instance;
+    }),
+  };
+});
 
 describe('Security and Robustness Tests', () => {
   beforeEach(() => {
@@ -335,23 +341,25 @@ describe('Security and Robustness Tests', () => {
       expect(result).toBe('fs-access-failed');
     });
 
-    it('should handle network request attempts', () => {
-      CreatePulser('network-test', () => {
+    it('should handle network request attempts', async () => {
+      CreatePulser('network-test', async () => {
         try {
           // Attempt to make a network request
-          fetch('https://httpbin.org/get')
-            .then(() => 'network-success')
-            .catch(() => 'network-failed');
-          return 'network-attempted';
+          const response = await fetch('https://httpbin.org/get');
+          if (response.ok) {
+            return 'network-success';
+          } else {
+            return 'network-failed';
+          }
         } catch (e) {
           return 'network-error';
         }
       });
       
       const pulser = new Pulser('network-test');
-      const result = pulser.pulse();
+      const result = await pulser.pulse();
       
-      expect(['network-attempted', 'network-error']).toContain(result);
+      expect(['network-success', 'network-failed', 'network-error']).toContain(result);
     });
 
     it('should handle timer and interval cleanup', () => {
@@ -456,6 +464,27 @@ describe('Security and Robustness Tests', () => {
       const result = pulser.pulse();
       
       expect(result).toBe('basic-functionality');
+    });
+
+    it('should handle consistency when binding fails', () => {
+      CreatePulser('consistency-test', () => 'initial-state');
+      const pulser = new Pulser('consistency-test');
+
+      // Simulate a scenario where a callback fails to bind
+      const failingCallback = () => { throw new Error('Binding failed'); };
+      
+      expect(() => pulser.bind(failingCallback)).toThrow('Binding failed');
+
+      // Get the mocked Logger instance that was created by Pulser
+      const loggerInstance = vi.mocked(Logger).mock.results[0].value;
+
+      // Verify that the error method of the mocked Logger instance was called
+      expect(loggerInstance.error).toHaveBeenCalledTimes(1);
+      expect(loggerInstance.error).toHaveBeenCalledWith(expect.stringContaining('Failed to bind callback'));
+
+      // The pulser should still be functional and its state consistent
+      expect(pulser.pulse()).toBe('initial-state');
+      expect(pulser.callbackCount).toBe(0);
     });
   });
 });

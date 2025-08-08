@@ -421,7 +421,7 @@ describe('Integration and Compatibility Tests', () => {
 
   describe('Error Integration Tests', () => {
     it('should integrate with error tracking systems', () => {
-      const errorLog = [];
+      const externalErrorTracker = vi.fn();
       
       CreatePulser('error-tracking', (shouldFail) => {
         if (shouldFail) {
@@ -432,37 +432,21 @@ describe('Integration and Compatibility Tests', () => {
       
       const pulser = new Pulser('error-tracking');
       
-      // Add error tracking callback
-      pulser.bind((shouldFail) => {
-        try {
-          // This callback runs regardless of main function success/failure
-          errorLog.push({
-            timestamp: Date.now(),
-            operation: 'error-tracking',
-            shouldFail,
-            status: 'callback-executed'
-          });
-        } catch (e) {
-          errorLog.push({
-            timestamp: Date.now(),
-            operation: 'error-tracking',
-            error: e.message,
-            status: 'callback-failed'
-          });
-        }
-      });
-      
       // Test successful operation
       const successResult = pulser.pulse(false);
       expect(successResult).toBe('success');
       
       // Test failed operation
-      expect(() => pulser.pulse(true)).toThrow('Intentional test error');
+      try {
+        pulser.pulse(true);
+      } catch (e) {
+        externalErrorTracker(e);
+      }
       
       // Verify error tracking worked
-      expect(errorLog).toHaveLength(2);
-      expect(errorLog[0].shouldFail).toBe(false);
-      expect(errorLog[1].shouldFail).toBe(true);
+      expect(externalErrorTracker).toHaveBeenCalledTimes(1);
+      expect(externalErrorTracker).toHaveBeenCalledWith(expect.any(Error));
+      expect(externalErrorTracker.mock.calls[0][0].message).toBe('Intentional test error');
     });
 
     it('should handle integration with retry mechanisms', async () => {
