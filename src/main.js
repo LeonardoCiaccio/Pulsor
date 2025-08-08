@@ -1,6 +1,11 @@
 import { createApp } from 'vue'
 import App from '@/App.vue'
 import '@/css/styles.css'
-import PulsorPlugin from '@/plugins/pulsor/plugin.js'
+import { initializePulsorEvents } from './pulsor.main.js'
 
-createApp(App).use(PulsorPlugin).mount('#app')
+const app = createApp(App);
+
+// Initialize Pulsor events
+initializePulsorEvents();
+
+app.mount('#app');
