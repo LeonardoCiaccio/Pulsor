@@ -8,6 +8,7 @@
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import process from 'process';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -20,11 +21,11 @@ const srcDir = path.join(rootDir, 'src', 'plugins', 'pulsor');
  */
 function setupDistDirectory() {
   console.log('🧹 Cleaning distribution directory...');
-  
+
   if (fs.existsSync(distDir)) {
     fs.rmSync(distDir, { recursive: true, force: true });
   }
-  
+
   fs.mkdirSync(distDir, { recursive: true });
   console.log('✅ Distribution directory created');
 }
@@ -34,16 +35,16 @@ function setupDistDirectory() {
  */
 function copyModuleFiles() {
   console.log('📦 Copying Pulsor module files...');
-  
+
   const filesToCopy = [
     'pulsor.js',
     'logger.class.js'
   ];
-  
+
   filesToCopy.forEach(file => {
     const srcFile = path.join(srcDir, file);
     const destFile = path.join(distDir, file);
-    
+
     if (fs.existsSync(srcFile)) {
       fs.copyFileSync(srcFile, destFile);
       console.log(`  ✓ Copied ${file}`);
@@ -58,7 +59,7 @@ function copyModuleFiles() {
  */
 function createNpmPackageJson() {
   console.log('📄 Creating NPM package.json...');
-  
+
   const packageJson = {
     "name": "pulsor",
     "version": "2.1.1",
@@ -101,7 +102,7 @@ function createNpmPackageJson() {
       "node": ">=16.0.0"
     }
   };
-  
+
   const packageJsonPath = path.join(distDir, 'package.json');
   fs.writeFileSync(packageJsonPath, JSON.stringify(packageJson, null, 2));
   console.log('✅ NPM package.json created');
@@ -112,7 +113,7 @@ function createNpmPackageJson() {
  */
 function createNpmReadme() {
   console.log('📖 Creating NPM README.md...');
-  
+
   const readme = `# Pulsor
 
 A lightweight and robust module for managing named function executors (pulsers). It provides a unified API for both synchronous and asynchronous operations, complete with a powerful callback system.
@@ -196,6 +197,7 @@ Creates and registers a new pulser.
 
 \`\`\`javascript
 import { CreatePulser, Pulser } from 'pulsor';
+import process from 'process';
 
 // Create pulsers
 CreatePulser('greet', (name) => \`Hello, \${name}!\`);
@@ -227,7 +229,7 @@ const result = calculator.pulse(5, 3);
 
 MIT License - see LICENSE file for details.
 `;
-  
+
   const readmePath = path.join(distDir, 'README.md');
   fs.writeFileSync(readmePath, readme);
   console.log('✅ NPM README.md created');
@@ -238,7 +240,7 @@ MIT License - see LICENSE file for details.
  */
 function createLicense() {
   console.log('📜 Creating LICENSE file...');
-  
+
   const license = `MIT License
 
 Copyright (c) 2024 Leonardo Ciaccio
@@ -261,7 +263,7 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 `;
-  
+
   const licensePath = path.join(distDir, 'LICENSE');
   fs.writeFileSync(licensePath, license);
   console.log('✅ LICENSE file created');
@@ -272,20 +274,20 @@ SOFTWARE.
  */
 function buildForNpm() {
   console.log('🚀 Building Pulsor for NPM distribution...\n');
-  
+
   try {
     setupDistDirectory();
     copyModuleFiles();
     createNpmPackageJson();
     createNpmReadme();
     createLicense();
-    
+
     console.log('\n🎉 NPM build completed successfully!');
     console.log(`📁 Distribution files created in: ${distDir}`);
     console.log('\n📋 Next steps:');
     console.log('   1. cd dist-npm');
     console.log('   2. npm publish');
-    
+
   } catch (error) {
     console.error('❌ Build failed:', error.message);
     process.exit(1);
