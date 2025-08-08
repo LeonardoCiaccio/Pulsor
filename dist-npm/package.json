@@ -1,0 +1,42 @@
+{
+  "name": "@leonardo_ciaccio/pulsor",
+  "version": "2.2.7",
+  "description": "A lightweight and robust module for managing named function executors with unified API for sync/async operations",
+  "main": "pulsor.js",
+  "type": "module",
+  "exports": {
+    ".": {
+      "import": "./pulsor.js",
+      "require": "./pulsor.js"
+    }
+  },
+  "files": [
+    "pulsor.js",
+    "logger.class.js",
+    "README.md",
+    "LICENSE"
+  ],
+  "keywords": [
+    "pulsor",
+    "function-executor",
+    "async",
+    "sync",
+    "callback",
+    "event-driven",
+    "lightweight",
+    "performance"
+  ],
+  "author": "Leonardo Ciaccio",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/LeonardoCiaccio/Pulsor.git"
+  },
+  "bugs": {
+    "url": "https://github.com/LeonardoCiaccio/Pulsor/issues"
+  },
+  "homepage": "https://github.com/LeonardoCiaccio/Pulsor#readme",
+  "engines": {
+    "node": ">=16.0.0"
+  }
+}
