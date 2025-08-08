@@ -35,7 +35,13 @@
 </template>
 
 <script setup>
-// Template component for sidebar and work area layout
+// Quando montato richiamo il pulsor loaded
+import { Pulser } from '@/plugins/pulsor/pulsor.js'
+import { onMounted } from 'vue'
+
+onMounted(() => {
+  new Pulser('sidebar:loaded').pulse()
+})
 </script>
 
 <style scoped>

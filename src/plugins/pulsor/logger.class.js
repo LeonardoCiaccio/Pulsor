@@ -31,10 +31,10 @@ export class Logger {
    * @param {*} logged - The content to log.
    * @param {string} type - The console method to use (e.g., 'log', 'warn', 'error').
    */
-  #console(logged, type) {
+  #console(type, ...args) {
     // Check if the service type exists in #services and is enabled.
     if (Object.prototype.hasOwnProperty.call(this.#services, type) && this.#services[type]) {
-      console[type](`${this.#prefix}: `, logged);
+      console[type](`${this.#prefix}: `, ...args);
     }
   };
 
@@ -49,7 +49,7 @@ export class Logger {
     // Dynamically assign logging methods (log, debug, info, warn, error) based on #services keys.
     // This allows calling logger.log(), logger.debug(), etc., which internally call #console.
     for (const type of Object.keys(this.#services)) {
-      this[type] = (logged) => this.#console(logged, type);
+      this[type] = (...args) => this.#console(type, ...args);
     }
   };
 

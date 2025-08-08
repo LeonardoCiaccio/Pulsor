@@ -4,19 +4,15 @@
  * This file should be imported once at application startup
  */
 
-import { CreatePulser } from './plugins/pulsor/pulsor.js';
+import { initializeSidebarEvents } from './pulsor.sidebar.js';
 
 
-export default function initializePulsorEvents() {
+function initializePulsorEvents() {
 
-  // Aggiunge un pulsante alla sidebar
-  CreatePulser('add.button.toSiderBar', (validatedSidebarId, validatedSelectorClassesArray, validatedLabel) => {
-    const button = document.createElement('button');
-    button.textContent = validatedLabel;
-    validatedSelectorClassesArray.forEach(className => button.classList.add(className));
-    document.querySelector(validatedSidebarId).appendChild(button);
-  });
-
-
-
+  console.log('Initializing Pulsor events');
+  initializeSidebarEvents();
 };
+
+// Export both named and default
+export { initializePulsorEvents };
+//export default initializePulsorEvents;

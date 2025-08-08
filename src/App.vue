@@ -1,5 +1,5 @@
 <script setup>
-import Structure from './components/Structure.vue';
+import Structure from '@/components/Structure.vue'
 </script>
 
 <template>

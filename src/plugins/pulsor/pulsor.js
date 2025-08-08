@@ -6,7 +6,7 @@
  * complete with a powerful callback system. The design emphasizes simplicity,
  * performance, and maintainability.
  *
- * @version 2.2.1
+ * @version 2.2.5
  * @example
  * import { CreatePulser, Pulser } from './pulsor.refactored.js';
  *
@@ -52,7 +52,9 @@ const Registry = Object.create(null);
 
 const LoggerServices = { log: true, error: true, warn: true, debug: false, info: true };
 const Loggy = new Logger(Prefix, LoggerServices);
-const F = Loggy.format;
+const F = (message) => {
+  Loggy.format(message);
+};
 
 // Cache for validated aliases to avoid repeated validation
 const aliasCache = new Map();
@@ -287,6 +289,31 @@ export const GetPulserInfo = (alias) => {
 };
 
 /**
+ * Factory function to create a Pulser instance without using the 'new' keyword.
+ * This provides a more functional programming approach and cleaner syntax.
+ *
+ * @param {string} alias - The alias of the pulser to control.
+ * @returns {Pulser} A new Pulser instance for the specified alias.
+ * @throws {PulsorError} If no pulser with the given alias is found.
+ *
+ * @example
+ * // Instead of: const myPulser = new Pulser('my-alias');
+ * const myPulser = Pulsor('my-alias');
+ * myPulser.pulse('data');
+ *
+ * @example
+ * // Functional chaining style
+ * Pulsor('calculator')
+ *   .bind(result => console.log('Result:', result))
+ *   .pulse(10, 5);
+ */
+// Factory wrapper to avoid using 'new' keyword with Pulser class
+export const Pulsor = (alias) => {
+  // Delegate to the Pulser class constructor
+  return new Pulser(alias);
+};
+
+/**
  * The Pulsor class provides an interface to interact with a registered pulser.
  * It is used to execute the pulser's main function and manage its callbacks.
  */
@@ -404,6 +431,7 @@ export class Pulser {
 
     this.#entry.callbacks.add(callback);
     Loggy.log(`Callback added to '${this.#alias}'.`);
+    return this;
   }
 
   /**
