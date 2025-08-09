@@ -61,12 +61,17 @@ export class Logger {
    */
   services(validatedServices = {}) {
     for (const key of Object.keys(validatedServices)) {
+      const tKey = key.trim().toLowerCase();
+      // Ignore the 'debug' service.
+      if (tKey === 'debug') {
+        continue;
+      }
       // Ensure that the provided service key is a valid property and its value is a boolean.
-      if (Object.prototype.hasOwnProperty.call(this.#services, key) && typeof validatedServices[key] === 'boolean') {
-        this.#services[key] = validatedServices[key];
+      if (Object.prototype.hasOwnProperty.call(this.#services, tKey) && typeof validatedServices[tKey] === 'boolean') {
+        this.#services[tKey] = !!validatedServices[tKey];
       }
     }
-  }
+  };
 
   /**
    * Formats a message by prepending the logger's prefix.

@@ -18,11 +18,11 @@ A lightweight and robust module for managing named function executors (pulsers).
 ## Installation
 
 ```bash
-npm install pulsor
+npm install @leonardo_ciaccio/pulsor
 ## Quick Start
 
 ```javascript
-import { CreatePulser, Pulser } from 'pulsor';
+import { CreatePulser, Pulser } from '@leonardo_ciaccio/pulsor';
 
 // Create a synchronous pulser
 CreatePulser('add', (a, b) => a + b);
@@ -103,7 +103,7 @@ Creates and registers a new pulser.
 ### Basic Usage
 
 ```javascript
-import { CreatePulser, Pulser } from 'pulsor';
+import { CreatePulser, Pulser } from '@leonardo_ciaccio/pulsor';
 
 // Create pulsers
 CreatePulser('greet', (name) => `Hello, ${name}!`);
@@ -194,7 +194,7 @@ setTimeout(boundProcess, 1000, 'delayed', 'data');
 ### Error Handling
 
 ```javascript
-import { CreatePulser, Pulser, PulsorError } from 'pulsor';
+import { CreatePulser, Pulser, PulsorError } from '@leonardo_ciaccio/pulsor';
 
 try {
   // This will throw PulsorError if pulser doesn't exist
@@ -234,7 +234,7 @@ Pulsers are persistent in the global registry, enabling powerful inter-module co
 ```javascript
 // Module A: Authentication Service
 // auth-module.js
-import { CreatePulser } from 'pulsor';
+import { CreatePulser } from '@leonardo_ciaccio/pulsor';
 
 CreatePulser('authenticate', async (credentials) => {
   const user = await validateCredentials(credentials);
@@ -248,12 +248,12 @@ CreatePulser('logout', (token) => {
 
 // Module B: User Management
 // user-module.js
-import { Pulser, Pulsor } from 'pulsor';
+import { Pulser, Pulsor } from '@leonardo_ciaccio/pulsor';
 
 // Connect to authentication pulser from another module
 const authenticateUser = async (email, password) => {
   const authResult = await Pulsor('authenticate').pulse({ email, password });
-  
+
   if (authResult.user) {
     // Trigger user-specific setup
     return Pulsor('setupUserSession').pulse(authResult.user);
@@ -272,7 +272,7 @@ CreatePulser('setupUserSession', (user) => {
 ```javascript
 // Module C: Notification System
 // notification-module.js
-import { Pulser, Pulsor } from 'pulsor';
+import { Pulser, Pulsor } from '@leonardo_ciaccio/pulsor';
 
 // Listen to authentication events from other modules
 Pulsor('authenticate')
@@ -306,7 +306,7 @@ Pulsor('authenticate')
 
 ```javascript
 // config-module.js - Central configuration
-import { CreatePulser } from 'pulsor';
+import { CreatePulser } from '@leonardo_ciaccio/pulsor';
 
 const appConfig = {
   apiUrl: 'https://api.example.com',
@@ -325,12 +325,12 @@ CreatePulser('updateConfig', (updates) => {
 
 // Any module can access configuration
 // api-module.js
-import { Pulsor } from 'pulsor';
+import { Pulsor } from '@leonardo_ciaccio/pulsor';
 const apiUrl = Pulsor('getConfig').pulse('apiUrl');
 const timeout = Pulsor('getConfig').pulse('timeout');
 
 // data-module.js
-import { Pulsor } from 'pulsor';
+import { Pulsor } from '@leonardo_ciaccio/pulsor';
 Pulsor('updateConfig').pulse({ apiUrl: 'https://new-api.example.com' });
 ```
 
@@ -338,19 +338,19 @@ Pulsor('updateConfig').pulse({ apiUrl: 'https://new-api.example.com' });
 
 ```javascript
 // core-system.js
-import { CreatePulser, ListPulsers } from 'pulsor';
+import { CreatePulser, ListPulsers } from '@leonardo_ciaccio/pulsor';
 
 // Core plugin registration system
 CreatePulser('registerPlugin', (pluginName, pluginConfig) => {
   CreatePulser(`plugin_${pluginName}`, pluginConfig.handler);
-  
+
   // Auto-bind to core events if specified
   if (pluginConfig.coreEvents) {
     pluginConfig.coreEvents.forEach(eventName => {
       Pulsor(eventName).bind(pluginConfig.eventHandler);
     });
   }
-  
+
   return { registered: true, name: pluginName };
 });
 
@@ -360,7 +360,7 @@ CreatePulser('listPlugins', () => {
 });
 
 // plugin-example.js
-import { Pulsor } from 'pulsor';
+import { Pulsor } from '@leonardo_ciaccio/pulsor';
 Pulsor('registerPlugin').pulse('dataValidator', {
   handler: (data) => validateDataStructure(data),
   coreEvents: ['dataProcessing', 'userInput'],

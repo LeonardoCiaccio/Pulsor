@@ -6,7 +6,7 @@
  * complete with a powerful callback system. The design emphasizes simplicity,
  * performance, and maintainability.
  *
- * @version 2.2.7
+ * @version 2.3.1
  * @example
  * import { CreatePulser, Pulser } from './pulsor.refactored.js';
  *
@@ -184,6 +184,30 @@ const executeCallbacksAsync = async (callbacks, args, alias) => {
 };
 
 // --- Public API Functions ---
+
+/**
+ * Sets the logging level for the Pulsor module
+ * @param {Object} logLevels - An object where keys are logging levels ('error', 'warn', 'info', 'log') and values are boolean-coercible to enable/disable them. The 'debug' level will be ignored if present.
+ * @throws {Error} If any provided level is not a valid logging level (excluding 'debug').
+ * @example
+ * // Enable error and info logging
+ * setLoggy({ error: true, info: true });
+ *
+ * // Disable warn logging
+ * setLoggy({ warn: false });
+ *
+ * // Debug level will be ignored
+ * setLoggy({ debug: true, warn: true });
+ */
+export const SetLoggy = (logLevels) => {
+
+  if (typeof logLevels !== 'object' || logLevels === null) {
+    throw new Error('Log levels must be an object.');
+  }
+
+  // Update the logger services with the new configuration, Loggy class will handle the rest
+  Loggy.services(logLevels);
+};
 
 /**
  * Creates and registers a new pulser.
@@ -490,7 +514,7 @@ export class Pulser {
     if (!Array.isArray(callbacks)) {
       throw new PulsorError(Loggy.format(`Expected array of callbacks for '${this.#alias}', got ${typeof callbacks}.`));
     }
-    
+
     callbacks.forEach((callback, index) => {
       try {
         this.bind(callback);
@@ -498,7 +522,7 @@ export class Pulser {
         throw new PulsorError(Loggy.format(`Error binding callback at index ${index} for '${this.#alias}': ${error.message}`));
       }
     });
-    
+
     return this;
   };
 
@@ -515,14 +539,14 @@ export class Pulser {
     if (!Array.isArray(callbacks)) {
       throw new PulsorError(Loggy.format(`Expected array of callbacks for '${this.#alias}', got ${typeof callbacks}.`));
     }
-    
+
     let removedCount = 0;
     callbacks.forEach(callback => {
       if (this.unbind(callback)) {
         removedCount++;
       }
     });
-    
+
     return removedCount;
   };
 

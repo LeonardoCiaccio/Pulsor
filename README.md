@@ -209,10 +209,13 @@ const data = await Pulsor('fetchData').pulse('/api/data');
 ## 🐛 Debug and Troubleshooting
 
 ### Logging
-Pulsor includes an integrated logging system:
+Pulsor includes an integrated info system:
 ```javascript
 // Enable detailed logging
-Pulsor.setLogLevel('debug');
+import { SetLoggy } from './src/plugins/pulsor/pulsor.js';
+
+SetLoggy({ info: true });
+SetLoggy({ info: true, warn: true });
 
 // Display pulser information
 console.log(ListPulsers());
