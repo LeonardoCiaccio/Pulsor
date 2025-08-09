@@ -6,7 +6,7 @@
  * complete with a powerful callback system. The design emphasizes simplicity,
  * performance, and maintainability.
  *
- * @version 2.3.1
+ * @version 2.3.2
  * @example
  * import { CreatePulser, Pulser } from './pulsor.refactored.js';
  *
