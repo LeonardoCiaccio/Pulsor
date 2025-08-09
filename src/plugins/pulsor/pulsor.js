@@ -191,13 +191,13 @@ const executeCallbacksAsync = async (callbacks, args, alias) => {
  * @throws {Error} If any provided level is not a valid logging level (excluding 'debug').
  * @example
  * // Enable error and info logging
- * setLoggy({ error: true, info: true });
+ * SetLoggy({ error: true, info: true });
  *
  * // Disable warn logging
- * setLoggy({ warn: false });
+ * SetLoggy({ warn: false });
  *
  * // Debug level will be ignored
- * setLoggy({ debug: true, warn: true });
+ * SetLoggy({ debug: true, warn: true });
  */
 export const SetLoggy = (logLevels) => {
 
