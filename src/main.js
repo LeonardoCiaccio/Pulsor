@@ -1,11 +1,19 @@
-import { createApp } from 'vue'
-import App from '@/App.vue'
-import '@/css/styles.css'
-import { initializePulsorEvents } from './pulsor.main.js'
+/**
+ * Il main è il punto d'ingresso, qui gestiamo il caricamento del framework
+ */
+import { InstallPulsorFetchFragment } from './js/tools/pulsor.fetch.fragment';
+import { CreateStructure } from './components/create.structure';
 
-const app = createApp(App);
+document.addEventListener('DOMContentLoaded', async () => {
 
-// Initialize Pulsor events
-initializePulsorEvents();
+  InstallPulsorFetchFragment().bind((fragment) => {
+    console.log('Fragment fetched: ', fragment);
+  });
 
-app.mount('#app');
+  CreateStructure()
+    .bind(() => {
+      console.log('Structure created');
+    })
+    .pulse();
+
+});
