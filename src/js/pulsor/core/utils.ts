@@ -310,25 +310,25 @@ export function validateCallbackOptions(options: unknown): asserts options is Ca
     }
   }
   
-  if ('priority' in opts && opts.priority !== undefined) {
-    if (typeof opts.priority !== 'number' || !Number.isInteger(opts.priority)) {
+  if ('priority' in opts && opts['priority'] !== undefined) {
+    if (typeof opts['priority'] !== 'number' || !Number.isInteger(opts['priority'])) {
       throw new PulsorValidationError(
         'priority must be an integer',
         {
           field: 'callbackOptions.priority',
-          value: opts.priority,
+          value: opts['priority'],
           expectedType: 'integer'
         }
       );
     }
     
-    if (opts.priority < PERFORMANCE_CONSTANTS.MIN_CALLBACK_PRIORITY || 
-        opts.priority > PERFORMANCE_CONSTANTS.MAX_CALLBACK_PRIORITY) {
+    if (opts['priority'] < PERFORMANCE_CONSTANTS.MIN_CALLBACK_PRIORITY || 
+        opts['priority'] > PERFORMANCE_CONSTANTS.MAX_CALLBACK_PRIORITY) {
       throw new PulsorValidationError(
         `priority must be between ${PERFORMANCE_CONSTANTS.MIN_CALLBACK_PRIORITY} and ${PERFORMANCE_CONSTANTS.MAX_CALLBACK_PRIORITY}`,
         {
           field: 'callbackOptions.priority',
-          value: opts.priority,
+          value: opts['priority'],
           context: {
             min: PERFORMANCE_CONSTANTS.MIN_CALLBACK_PRIORITY,
             max: PERFORMANCE_CONSTANTS.MAX_CALLBACK_PRIORITY
@@ -338,26 +338,26 @@ export function validateCallbackOptions(options: unknown): asserts options is Ca
     }
   }
   
-  if ('once' in opts && opts.once !== undefined) {
-    if (typeof opts.once !== 'boolean') {
+  if ('once' in opts && opts['once'] !== undefined) {
+    if (typeof opts['once'] !== 'boolean') {
       throw new PulsorValidationError(
         'once must be a boolean',
         {
           field: 'callbackOptions.once',
-          value: opts.once,
+          value: opts['once'],
           expectedType: 'boolean'
         }
       );
     }
   }
   
-  if ('ttl' in opts && opts.ttl !== undefined) {
-    if (typeof opts.ttl !== 'number' || !Number.isInteger(opts.ttl) || opts.ttl < 0) {
+  if ('ttl' in opts && opts['ttl'] !== undefined) {
+    if (typeof opts['ttl'] !== 'number' || !Number.isInteger(opts['ttl']) || opts['ttl'] < 0) {
       throw new PulsorValidationError(
         'ttl must be a non-negative integer',
         {
           field: 'callbackOptions.ttl',
-          value: opts.ttl,
+          value: opts['ttl'],
           expectedType: 'non-negative integer'
         }
       );
@@ -425,8 +425,8 @@ export function isDangerousKey(key: string): boolean {
  * Sanitize arguments to prevent prototype pollution
  * Creates a deep clone while filtering out dangerous keys
  */
-export function sanitizeArgs<T extends readonly unknown[]>(args: T): T {
-  return args.map(arg => sanitizeValue(arg)) as T;
+export function sanitizeArgs<T extends readonly unknown[]>(args: T): unknown[] {
+  return args.map(arg => sanitizeValue(arg));
 }
 
 /**
@@ -644,11 +644,11 @@ export function calculatePercentile(sortedValues: readonly number[], percentile:
   }
   
   if (percentile <= 0) {
-    return sortedValues[0];
+    return sortedValues[0] ?? 0;
   }
   
   if (percentile >= 100) {
-    return sortedValues[sortedValues.length - 1];
+    return sortedValues[sortedValues.length - 1] ?? 0;
   }
   
   const index = (percentile / 100) * (sortedValues.length - 1);
@@ -656,9 +656,11 @@ export function calculatePercentile(sortedValues: readonly number[], percentile:
   const upper = Math.ceil(index);
   
   if (lower === upper) {
-    return sortedValues[lower];
+    return sortedValues[lower] ?? 0;
   }
   
   const weight = index - lower;
-  return sortedValues[lower] * (1 - weight) + sortedValues[upper] * weight;
+  const lowerValue = sortedValues[lower] ?? 0;
+  const upperValue = sortedValues[upper] ?? 0;
+  return lowerValue * (1 - weight) + upperValue * weight;
 }

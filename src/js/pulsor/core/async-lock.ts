@@ -84,10 +84,7 @@ const DEFAULT_CONFIG: AsyncLockConfig = {
  */
 const DEFAULT_PRIORITY = 0;
 
-/**
- * High priority value
- */
-const HIGH_PRIORITY = 10;
+
 
 /**
  * Maximum wait time for deadlock detection (ms)
@@ -108,7 +105,7 @@ export class AsyncLock implements IAsyncLock {
   private readonly waitingQueues = new Map<string, LockRequest[]>();
   private readonly stats: LockStats;
   private readonly waitTimes: number[] = [];
-  private deadlockDetectionTimer?: NodeJS.Timeout;
+  private deadlockDetectionTimer?: NodeJS.Timeout | undefined;
   private isDestroyed = false;
 
   constructor(config: Partial<AsyncLockConfig> = {}) {
@@ -418,9 +415,10 @@ export class AsyncLock implements IAsyncLock {
 
       // Create timeout handler
       const timeoutHandle = setTimeout(() => {
-        this.handleTimeout(key, requestId, startTime);
+        this.handleTimeout(key, requestId);
         reject(new PulsorTimeoutError(
-          `Lock acquisition timeout after ${timeout}ms for key '${key}'`
+          timeout,
+          { context: { key, message: `Lock acquisition timeout after ${timeout}ms for key '${key}'` } }
         ));
       }, timeout);
 
@@ -513,7 +511,7 @@ export class AsyncLock implements IAsyncLock {
   /**
    * Handle timeout for a lock request
    */
-  private handleTimeout(key: string, requestId: string, startTime: number): void {
+  private handleTimeout(key: string, requestId: string): void {
     const queue = this.waitingQueues.get(key);
     if (!queue) {
       return;

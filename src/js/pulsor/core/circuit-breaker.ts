@@ -96,14 +96,7 @@ const DEFAULT_CONFIG: CircuitBreakerConfig = {
   minimumThroughput: 10 // minimum calls per monitoring period
 };
 
-/**
- * State names for logging
- */
-const STATE_NAMES: Record<CircuitBreakerState, string> = {
-  CLOSED: 'CLOSED',
-  OPEN: 'OPEN',
-  HALF_OPEN: 'HALF_OPEN'
-};
+
 
 // ============================================================================
 // CIRCUIT BREAKER IMPLEMENTATION
@@ -180,9 +173,10 @@ export class CircuitBreaker implements ICircuitBreaker {
       }
       
       throw new PulsorCircuitBreakerError(
-        `Circuit breaker '${this.name}' is ${STATE_NAMES[this.state]}`,
-        'CIRCUIT_BREAKER_OPEN',
-        { state: this.state, name: this.name }
+        this.name,
+        this.failureCount,
+        this.config.failureThreshold,
+        { context: { state: this.state, name: this.name } }
       );
     }
 
@@ -284,7 +278,7 @@ export class CircuitBreaker implements ICircuitBreaker {
         success: false,
         duration: executionDuration,
         timestamp,
-        error
+        error: error
       });
     }
 
