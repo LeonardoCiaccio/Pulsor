@@ -25,7 +25,8 @@ import type {
   CallbackOptions,
   PatternCallbackOptions,
   CreatePulserOptions,
-  PulserMetrics
+  PulserMetrics,
+  GlobalMetrics
 } from './types/index.js';
 
 import type {
@@ -419,22 +420,16 @@ export class Pulsor {
   
   /**
    * Get metrics for all Pulsers
-   * @returns Pulser metrics
+   * @returns Global metrics
    */
-  public getMetrics(): PulserMetrics {
+  public getMetrics(): GlobalMetrics {
     this.ensureNotDestroyed();
     
     if (!this.metricsService) {
       throw new PulsorError('Metrics service is not enabled', { code: 'METRICS_DISABLED' });
     }
     
-    const globalMetrics = this.metricsService.getGlobalMetrics();
-    return {
-      totalPulsers: this.pulsers.size,
-      totalPatternCallbacks: this.patternCallbacks.size,
-      activeExecutions: this.executions.size,
-      ...globalMetrics
-    };
+    return this.metricsService.getGlobalMetrics();
   }
   
   /**
