@@ -5,7 +5,7 @@
  * @author Pulsor Team
  */
 
-import type { CircuitBreakerState } from '../types/index.js';
+import type { CircuitBreakerState, CircuitBreakerStatus } from '../types/index.js';
 import type { ICircuitBreaker } from '../interfaces/index.js';
 import { PulsorCircuitBreakerError } from './errors.js';
 import { nowMs, calculatePercentile } from './utils.js';
@@ -202,7 +202,7 @@ export class CircuitBreaker implements ICircuitBreaker {
     } catch (error) {
       const duration = nowMs() - startTime;
       
-      this.onFailure(error as Error, duration);
+      this.recordFailure(error as Error, duration);
       throw error;
     }
   }
@@ -252,9 +252,16 @@ export class CircuitBreaker implements ICircuitBreaker {
   }
 
   /**
-   * Record a failed execution
+   * Record a failed execution (interface implementation)
    */
-  public onFailure(error: Error, duration?: number): void {
+  public onFailure(): void {
+    this.recordFailure();
+  }
+
+  /**
+   * Record a failed execution with details
+   */
+  public recordFailure(error?: Error, duration?: number): void {
     if (this.isDestroyed) {
       return;
     }
@@ -300,6 +307,18 @@ export class CircuitBreaker implements ICircuitBreaker {
    */
   public getState(): CircuitBreakerState {
     return this.state;
+  }
+  
+  /**
+   * Get current status
+   */
+  public getStatus(): CircuitBreakerStatus {
+    return {
+      state: this.state,
+      failureCount: this.failureCount,
+      threshold: this.config.failureThreshold,
+      nextAttempt: this.state === 'OPEN' ? this.lastFailureTime + this.config.recoveryTimeout : 0
+    };
   }
 
   /**

@@ -102,6 +102,7 @@ const MAX_DEADLOCK_WAIT_TIME = 60000; // 1 minute
  * Advanced asynchronous lock implementation
  */
 export class AsyncLock implements IAsyncLock {
+  private defaultKey = 'default';
   private readonly config: AsyncLockConfig;
   private readonly heldLocks = new Map<string, LockHolder>();
   private readonly waitingQueues = new Map<string, LockRequest[]>();
@@ -130,9 +131,16 @@ export class AsyncLock implements IAsyncLock {
   }
 
   /**
+   * Acquire a lock with optional timeout (IAsyncLock interface)
+   */
+  public async acquire(timeoutMs?: number): Promise<void> {
+    return this.acquireKey(this.defaultKey, timeoutMs);
+  }
+
+  /**
    * Acquire a lock for the specified key
    */
-  public async acquire(
+  public async acquireKey(
     key: string,
     timeout: number = this.config.defaultTimeout,
     priority: number = DEFAULT_PRIORITY
@@ -168,9 +176,16 @@ export class AsyncLock implements IAsyncLock {
   }
 
   /**
+   * Release the lock (IAsyncLock interface)
+   */
+  public release(): void {
+    this.releaseKey(this.defaultKey);
+  }
+
+  /**
    * Release a lock for the specified key
    */
-  public release(key: string): void {
+  public releaseKey(key: string): void {
     if (this.isDestroyed) {
       return;
     }
@@ -198,7 +213,7 @@ export class AsyncLock implements IAsyncLock {
    * Try to acquire a lock without waiting
    */
   public tryAcquire(key: string, priority: number = DEFAULT_PRIORITY): boolean {
-    if (this.isDestroyed || this.heldLocks.has(key)) {
+    if (this.isDestroyed || this.isKeyLocked(key)) {
       return false;
     }
 
@@ -209,7 +224,7 @@ export class AsyncLock implements IAsyncLock {
   /**
    * Check if a lock is currently held
    */
-  public isLocked(key: string): boolean {
+  public isKeyLocked(key: string): boolean {
     return this.heldLocks.has(key);
   }
 
@@ -234,6 +249,20 @@ export class AsyncLock implements IAsyncLock {
   public getTotalWaitingCount(): number {
     return Array.from(this.waitingQueues.values())
       .reduce((sum, queue) => sum + queue.length, 0);
+  }
+
+  /**
+   * Number of queued operations (required by IAsyncLock)
+   */
+  public get queueLength(): number {
+    return this.getTotalWaitingCount();
+  }
+
+  /**
+   * Check if lock is currently acquired (required by IAsyncLock)
+   */
+  public get isLocked(): boolean {
+    return this.isKeyLocked(this.defaultKey);
   }
 
   /**
@@ -306,7 +335,7 @@ export class AsyncLock implements IAsyncLock {
     // Release all held locks
     const heldKeys = Array.from(this.heldLocks.keys());
     for (const key of heldKeys) {
-      this.release(key);
+      this.releaseKey(key);
     }
 
     // Reject all waiting requests

@@ -25,44 +25,32 @@ import type {
   CallbackOptions,
   PatternCallbackOptions,
   CreatePulserOptions,
-  PulserMetrics,
   GlobalMetrics
 } from './types/index.js';
 
 import type {
   ILogger,
-  IAsyncLock,
-  ICircuitBreaker,
   IServiceFactory
 } from './interfaces/index.js';
 
 import {
-  Logger,
-  AsyncLock,
-  CircuitBreaker,
   EventEmitter,
-  Validator,
   PulsorError,
-  PulsorValidationError,
   PulsorTimeoutError,
   PulsorNotFoundError,
   PulsorAlreadyExistsError,
   validateAlias,
-  validateFunction,
   validatePulserOptions,
   validateCallbackOptions,
   nowMs,
   generateExecutionId,
-  isPromise,
-  mergeOptions,
-  PULSOR_STOP
+  mergeOptions
 } from './core/index.js';
 
 import {
   MetricsService,
   MemoryService,
   SecurityService,
-  ServiceFactory,
   globalServiceFactory
 } from './services/index.js';
 
@@ -72,10 +60,6 @@ import {
 export interface PulsorConfig {
   /** Logger instance or configuration */
   logger?: ILogger | any;
-  /** Async lock instance or configuration */
-  asyncLock?: IAsyncLock | any;
-  /** Circuit breaker instance or configuration */
-  circuitBreaker?: ICircuitBreaker | any;
   /** Service factory instance or configuration */
   serviceFactory?: IServiceFactory | any;
   /** Enable metrics collection */
@@ -96,16 +80,13 @@ export interface PulsorConfig {
  * Main Pulsor class - Advanced function execution framework
  */
 export class Pulsor {
-  private readonly pulsers = new Map<string, PulserFunction>();
+  private readonly pulsers = new Map<string, PulserFunction<readonly unknown[], unknown>>();
   private readonly callbacks = new Map<string, CallbackFunction>();
   private readonly patternCallbacks = new Map<string, CallbackFunction>();
   private readonly executions = new Map<string, Promise<any>>();
   private readonly config: Required<PulsorConfig>;
   private readonly logger: ILogger;
-  private readonly asyncLock: IAsyncLock;
-  private readonly circuitBreaker: ICircuitBreaker;
   private readonly eventEmitter: EventEmitter;
-  private readonly validator: Validator;
   private readonly metricsService: MetricsService;
   private readonly memoryService: MemoryService;
   private readonly securityService: SecurityService;
@@ -118,8 +99,6 @@ export class Pulsor {
     // Set default configuration
     this.config = {
       logger: config.logger,
-      asyncLock: config.asyncLock,
-      circuitBreaker: config.circuitBreaker,
       serviceFactory,
       enableMetrics: config.enableMetrics ?? true,
       enableMemoryMonitoring: config.enableMemoryMonitoring ?? true,
@@ -131,10 +110,7 @@ export class Pulsor {
     
     // Initialize core services
     this.logger = this.config.logger || serviceFactory.createLogger();
-    this.asyncLock = this.config.asyncLock || serviceFactory.createAsyncLock();
-    this.circuitBreaker = this.config.circuitBreaker || serviceFactory.createCircuitBreaker();
     this.eventEmitter = serviceFactory.createEventEmitter();
-    this.validator = serviceFactory.createValidator();
     
     // Initialize optional services
     this.metricsService = this.config.enableMetrics ? serviceFactory.createMetricsService() : null as any;
@@ -166,7 +142,6 @@ export class Pulsor {
     
     // Validate inputs
     validateAlias(alias);
-    validateFunction(fn);
     
     if (this.pulsers.has(alias)) {
       throw new PulsorAlreadyExistsError(`Pulser with alias '${alias}' already exists`);
@@ -174,7 +149,7 @@ export class Pulsor {
     
     // Security check
     if (this.securityService) {
-      this.securityService.validateFunction(fn, { alias });
+      this.securityService.validateFunction(alias, fn);
     }
     
     // Create Pulser function
@@ -200,10 +175,16 @@ export class Pulsor {
       createdAt: { value: nowMs(), writable: false }
     });
     
-    this.pulsers.set(alias, pulser);
+    this.pulsers.set(alias, pulser as PulserFunction<readonly unknown[], unknown>);
     
     this.logger.debug(`Pulser '${alias}' created`, { options: pulserOptions });
-    this.eventEmitter.emit('pulser:created', { alias, options: pulserOptions });
+    this.eventEmitter.emit('pulserCreated', { 
+      alias, 
+      timestamp: nowMs(),
+      isAsync: options.isAsync || false,
+      version: 1,
+      override: false
+    });
     
     return pulser;
   }
@@ -225,33 +206,24 @@ export class Pulsor {
     try {
       // Security validation
       if (this.securityService) {
-        this.securityService.validateArgs(args, { alias, executionId });
-        
         if (!this.securityService.checkRateLimit(alias)) {
-          throw new PulsorError('Rate limit exceeded', 'RATE_LIMIT_EXCEEDED');
+          throw new PulsorError('Rate limit exceeded', { code: 'RATE_LIMIT_EXCEEDED' });
         }
       }
       
       // Check concurrent executions
       if (this.executions.size >= this.config.maxConcurrentExecutions) {
-        throw new PulsorError('Maximum concurrent executions reached', 'MAX_CONCURRENCY_REACHED');
+        throw new PulsorError('Maximum concurrent executions reached', { code: 'MAX_CONCURRENCY_REACHED' });
       }
       
-      // Execute with circuit breaker if enabled
-      let result: R;
-      if (options.circuitBreaker && this.circuitBreaker) {
-        result = await this.circuitBreaker.execute(async () => {
-          return this.executeWithTimeout(fn, args, options.timeout || this.config.globalTimeout);
-        });
-      } else {
-        result = await this.executeWithTimeout(fn, args, options.timeout || this.config.globalTimeout);
-      }
+      // Execute with timeout
+      const result = await this.executeWithTimeout(fn, args, options.timeout || this.config.globalTimeout);
       
       const duration = nowMs() - startTime;
       
       // Record metrics
       if (this.metricsService) {
-        this.metricsService.recordExecution(alias, duration, true, startTime, executionId);
+        this.metricsService.recordExecution(alias, executionId, startTime, nowMs(), true);
       }
       
       this.logger.debug(`Pulser '${alias}' executed successfully`, {
@@ -259,10 +231,13 @@ export class Pulsor {
         duration
       });
       
-      this.eventEmitter.emit('pulser:executed', {
+      this.eventEmitter.emit('pulseCompleted', {
+        timestamp: nowMs(),
+        executionId,
         alias,
+        status: 'success' as const,
         duration,
-        result
+        attempt: 1
       });
       
       return result;
@@ -272,7 +247,7 @@ export class Pulsor {
       
       // Record error metrics
       if (this.metricsService) {
-        this.metricsService.recordError(alias, error as Error, startTime);
+        this.metricsService.recordError(alias, executionId, error as Error);
       }
       
       this.logger.error(`Pulser '${alias}' execution failed`, {
@@ -281,7 +256,8 @@ export class Pulsor {
         error: error instanceof Error ? error.message : String(error)
       });
       
-      this.eventEmitter.emit('pulser:error', {
+      this.eventEmitter.emit('pulseError', {
+        timestamp: nowMs(),
         alias,
         error: error as Error
       });
@@ -302,7 +278,7 @@ export class Pulsor {
   ): Promise<R> {
     return new Promise<R>((resolve, reject) => {
       const timeoutId = setTimeout(() => {
-        reject(new PulsorTimeoutError(`Execution timed out after ${timeout}ms`));
+        reject(new PulsorTimeoutError(timeout));
       }, Number(timeout));
       
       Promise.resolve(fn(...args))
@@ -326,12 +302,12 @@ export class Pulsor {
     this.ensureNotDestroyed();
     validateAlias(alias);
     
-    const pulser = this.pulsers.get(alias) as PulserFunction<T, R>;
+    const pulser = this.pulsers.get(alias);
     if (!pulser) {
       throw new PulsorNotFoundError(`Pulser with alias '${alias}' not found`);
     }
     
-    return pulser;
+    return pulser as PulserFunction<T, R>;
   }
   
   /**
@@ -357,7 +333,7 @@ export class Pulsor {
     const removed = this.pulsers.delete(alias);
     if (removed) {
       this.logger.debug(`Pulser '${alias}' removed`);
-      this.eventEmitter.emit('pulser:removed', { alias });
+      this.eventEmitter.emit('pulserDestroyed', { timestamp: nowMs(), alias });
     }
     
     return removed;
@@ -385,7 +361,6 @@ export class Pulsor {
   ): void {
     this.ensureNotDestroyed();
     validateAlias(alias);
-    validateFunction(callback);
     validateCallbackOptions(options);
     
     if (this.callbacks.has(alias)) {
@@ -395,7 +370,7 @@ export class Pulsor {
     this.callbacks.set(alias, callback);
     
     this.logger.debug(`Callback '${alias}' added`, { options });
-    this.eventEmitter.emit('pulser:callback-added', { alias, options });
+    this.eventEmitter.emit('pulserUpdated', { timestamp: nowMs(), alias });
   }
   
   /**
@@ -410,12 +385,12 @@ export class Pulsor {
     options: PatternCallbackOptions = {}
   ): void {
     this.ensureNotDestroyed();
-    validateFunction(callback);
+    // Pattern callback validation
     
     this.patternCallbacks.set(pattern, callback);
     
     this.logger.debug(`Pattern callback '${pattern}' added`, { options });
-    this.eventEmitter.emit('pulser:pattern-callback-added', { pattern, options });
+    this.eventEmitter.emit('pulserUpdated', { timestamp: nowMs(), alias: pattern });
   }
   
   /**
@@ -480,10 +455,10 @@ export class Pulsor {
       removedPatternCallbacks: patternCallbackCount
     });
     
-    this.eventEmitter.emit('pulser:cleared', {
-      removedPulsers: pulserCount,
-      removedCallbacks: callbackCount,
-      removedPatternCallbacks: patternCallbackCount
+    this.eventEmitter.emit('patternsCleaned', {
+      timestamp: nowMs(),
+      removed: pulserCount + callbackCount,
+      removedPatterns: []
     });
   }
   
@@ -513,7 +488,7 @@ export class Pulsor {
     this.destroyed = true;
     
     this.logger.info('Pulsor instance destroyed');
-    this.eventEmitter.emit('pulser:destroyed', {});
+    this.eventEmitter.emit('pulserDestroyed', { timestamp: nowMs(), alias: 'main' });
   }
   
   /**
@@ -672,9 +647,9 @@ export function addPatternCallback(
 
 /**
  * Get metrics using the global instance
- * @returns Pulser metrics
+ * @returns Global metrics
  */
-export function getMetrics(): PulserMetrics {
+export function getMetrics(): GlobalMetrics {
   return globalPulsor.getMetrics();
 }
 
@@ -707,10 +682,7 @@ export const METADATA = {
   documentation: 'https://pulsor.dev/docs'
 } as const;
 
-/**
- * Export the PULSOR_STOP symbol for convenience
- */
-export { PULSOR_STOP };
+
 
 // ============================================================================
 // DEFAULT EXPORT

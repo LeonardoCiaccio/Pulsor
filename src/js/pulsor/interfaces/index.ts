@@ -11,7 +11,6 @@ import type {
   PatternId,
   Timestamp,
   PulsePhase,
-  CircuitBreakerState,
   LogLevel,
   PulserFunction,
   CallbackFunction,
@@ -21,16 +20,11 @@ import type {
   PulserMetrics,
   GlobalMetrics,
   AdvancedMetrics,
-  PulserInfo,
   CircuitBreakerStatus,
-  HealthReport,
   EventDataMap,
-  EventListener,
-  BatchCreateResult,
-  BatchDestroyResult,
-  BindsResult,
-  GracefulShutdownResult
+  EventListener
 } from '../types/index.js';
+import type { MemorySnapshot } from '../services/memory.js';
 
 // ============================================================================
 // CORE SERVICE INTERFACES
@@ -263,6 +257,9 @@ export interface IMemoryService {
     external: number;
     rss: number;
   } | null;
+  
+  /** Ottiene la cronologia degli snapshot della memoria */
+  getSnapshots(limit?: number): ReadonlyArray<MemorySnapshot>;
 }
 
 /**

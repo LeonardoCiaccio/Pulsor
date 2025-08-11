@@ -73,7 +73,7 @@ export type {
 // SERVICE FACTORY
 // ============================================================================
 
-import type { IServiceFactory } from '../interfaces/index.js';
+import type { IServiceFactory, IAsyncLock, ICircuitBreaker, IValidator, ILogger, IEventEmitter, IMemoryService, ISecurityService, IMetricsService } from '../interfaces/index.js';
 import { MetricsService } from './metrics.js';
 import { MemoryService } from './memory.js';
 import { SecurityService } from './security.js';
@@ -161,7 +161,7 @@ export class ServiceFactory implements IServiceFactory {
   /**
    * Create metrics service
    */
-  public createMetricsService(): MetricsService {
+  public createMetricsService(): IMetricsService {
     const key = 'metrics';
     if (this.services.has(key)) {
       return this.services.get(key);
@@ -192,13 +192,13 @@ export class ServiceFactory implements IServiceFactory {
     }
     
     this.services.set(key, service);
-    return service;
+    return service as IMetricsService;
   }
   
   /**
    * Create memory service
    */
-  public createMemoryService(): MemoryService {
+  public createMemoryService(): IMemoryService {
     const key = 'memory';
     if (this.services.has(key)) {
       return this.services.get(key);
@@ -229,13 +229,13 @@ export class ServiceFactory implements IServiceFactory {
     }
     
     this.services.set(key, service);
-    return service;
+    return service as IMemoryService;
   }
   
   /**
    * Create security service
    */
-  public createSecurityService(): SecurityService {
+  public createSecurityService(): ISecurityService {
     const key = 'security';
     if (this.services.has(key)) {
       return this.services.get(key);
@@ -266,13 +266,13 @@ export class ServiceFactory implements IServiceFactory {
     }
     
     this.services.set(key, service);
-    return service;
+    return service as ISecurityService;
   }
   
   /**
    * Create logger
    */
-  public createLogger(): Logger {
+  public createLogger(): ILogger {
     const key = 'logger';
     if (this.services.has(key)) {
       return this.services.get(key);
@@ -302,13 +302,13 @@ export class ServiceFactory implements IServiceFactory {
     }
     
     this.services.set(key, service);
-    return service;
+    return service as ILogger;
   }
   
   /**
    * Create async lock
    */
-  public createAsyncLock(): AsyncLock {
+  public createAsyncLock(): IAsyncLock {
     const key = 'asyncLock';
     if (this.services.has(key)) {
       return this.services.get(key);
@@ -334,14 +334,22 @@ export class ServiceFactory implements IServiceFactory {
     }
     
     this.services.set(key, service);
-    return service;
+    return service as IAsyncLock;
   }
   
   /**
    * Create circuit breaker
    */
-  public createCircuitBreaker(): CircuitBreaker {
-    const key = 'circuitBreaker';
+  public createCircuitBreaker(): ICircuitBreaker;
+  public createCircuitBreaker(threshold: number, timeoutMs: number): ICircuitBreaker;
+  public createCircuitBreaker(threshold?: number, timeoutMs?: number): ICircuitBreaker {
+    // Use default values if parameters are not provided
+    const defaultThreshold = 5;
+    const defaultTimeoutMs = 60000;
+    const actualThreshold = threshold ?? defaultThreshold;
+    const actualTimeoutMs = timeoutMs ?? defaultTimeoutMs;
+    
+    const key = `circuitBreaker_${actualThreshold}_${actualTimeoutMs}`;
     if (this.services.has(key)) {
       return this.services.get(key);
     }
@@ -351,32 +359,39 @@ export class ServiceFactory implements IServiceFactory {
       throw new Error('Circuit breaker is disabled');
     }
     
+    // Create circuit breaker config with provided parameters
+    const circuitBreakerConfig = {
+      ...config.config,
+      failureThreshold: actualThreshold,
+      recoveryTimeout: actualTimeoutMs
+    };
+    
     let service: CircuitBreaker;
     switch (config.type) {
       case 'fast-fail':
         const { createFastFailCircuitBreaker } = require('../core/circuit-breaker.js');
-        service = createFastFailCircuitBreaker();
+        service = createFastFailCircuitBreaker(circuitBreakerConfig);
         break;
       case 'adaptive':
         const { createAdaptiveCircuitBreaker } = require('../core/circuit-breaker.js');
-        service = createAdaptiveCircuitBreaker();
+        service = createAdaptiveCircuitBreaker(circuitBreakerConfig);
         break;
       case 'test':
         const { createTestCircuitBreaker } = require('../core/circuit-breaker.js');
-        service = createTestCircuitBreaker();
+        service = createTestCircuitBreaker(circuitBreakerConfig);
         break;
       default:
-        service = createCircuitBreaker(config.config);
+        service = createCircuitBreaker(circuitBreakerConfig);
     }
     
     this.services.set(key, service);
-    return service;
+    return service as ICircuitBreaker;
   }
   
   /**
    * Create event emitter
    */
-  public createEventEmitter(): EventEmitter {
+  public createEventEmitter(): IEventEmitter {
     const key = 'eventEmitter';
     if (this.services.has(key)) {
       return this.services.get(key);
@@ -402,13 +417,13 @@ export class ServiceFactory implements IServiceFactory {
     }
     
     this.services.set(key, service);
-    return service;
+    return service as IEventEmitter;
   }
   
   /**
    * Create validator
    */
-  public createValidator(): Validator {
+  public createValidator(): IValidator {
     const key = 'validator';
     if (this.services.has(key)) {
       return this.services.get(key);
@@ -438,7 +453,7 @@ export class ServiceFactory implements IServiceFactory {
     }
     
     this.services.set(key, service);
-    return service;
+    return service as IValidator;
   }
   
   /**
@@ -545,14 +560,14 @@ export const globalServiceFactory = createServiceFactory();
  * Initialize all services with default configuration
  */
 export function initializeServices(config?: ServiceFactoryConfig): {
-  metrics: MetricsService;
-  memory: MemoryService;
-  security: SecurityService;
-  logger: Logger;
-  asyncLock: AsyncLock;
-  circuitBreaker: CircuitBreaker;
-  eventEmitter: EventEmitter;
-  validator: Validator;
+  metrics: IMetricsService;
+  memory: IMemoryService;
+  security: ISecurityService;
+  logger: ILogger;
+  asyncLock: IAsyncLock;
+  circuitBreaker: ICircuitBreaker;
+  eventEmitter: IEventEmitter;
+  validator: IValidator;
 } {
   const factory = createServiceFactory(config);
   
@@ -562,7 +577,7 @@ export function initializeServices(config?: ServiceFactoryConfig): {
     security: factory.createSecurityService(),
     logger: factory.createLogger(),
     asyncLock: factory.createAsyncLock(),
-    circuitBreaker: factory.createCircuitBreaker(),
+    circuitBreaker: factory.createCircuitBreaker(5, 30000),
     eventEmitter: factory.createEventEmitter(),
     validator: factory.createValidator()
   };

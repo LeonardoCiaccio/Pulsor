@@ -13,16 +13,11 @@ import type {
   CallbackFunction
 } from '../types/index.js';
 import type { IValidator } from '../interfaces/index.js';
-import { 
-  PulsorValidationError, 
-  extractErrorInfo,
-  normalizeError 
+import {
+  PulsorValidationError
 } from './errors.js';
-import { 
-  SECURITY_CONSTANTS,
+import {
   isDangerousKey,
-  sanitizeArgs,
-  isAsyncFunction,
   isPromise
 } from './utils.js';
 
@@ -122,29 +117,7 @@ const DEFAULT_OPTIONS: ValidationOptions = {
   customRules: new Map()
 };
 
-/**
- * Built-in validation rules
- */
-const BUILT_IN_RULES = {
-  required: (value: any) => value !== undefined && value !== null,
-  string: (value: any) => typeof value === 'string',
-  number: (value: any) => typeof value === 'number' && !isNaN(value),
-  boolean: (value: any) => typeof value === 'boolean',
-  function: (value: any) => typeof value === 'function',
-  object: (value: any) => value !== null && typeof value === 'object',
-  array: (value: any) => Array.isArray(value),
-  email: (value: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value),
-  url: (value: string) => {
-    try {
-      new URL(value);
-      return true;
-    } catch {
-      return false;
-    }
-  },
-  alphanumeric: (value: string) => /^[a-zA-Z0-9]+$/.test(value),
-  safe: (value: string) => !isDangerousKey(value)
-};
+
 
 /**
  * Error codes
@@ -187,102 +160,96 @@ export class Validator implements IValidator {
   /**
    * Validate Pulser alias
    */
-  public validateAlias(alias: unknown): alias is PulserAlias {
-    try {
-      const result = this.validateValue(alias, {
-        type: 'string',
-        required: true,
-        rules: [
-          (value: string) => value.length > 0 || 'Alias cannot be empty',
-          (value: string) => value.length <= 100 || 'Alias too long (max 100 characters)',
-          (value: string) => /^[a-zA-Z0-9_-]+$/.test(value) || 'Alias contains invalid characters',
-          (value: string) => !isDangerousKey(value) || 'Alias contains dangerous patterns'
-        ]
-      });
-      
-      return result.valid;
-    } catch {
-      return false;
+  public validateAlias(alias: unknown): asserts alias is PulserAlias {
+    const result = this.validateValue(alias, {
+      type: 'string',
+      required: true,
+      rules: [
+        (value: string) => value.length > 0 || 'Alias cannot be empty',
+        (value: string) => value.length <= 100 || 'Alias too long (max 100 characters)',
+        (value: string) => /^[a-zA-Z0-9_-]+$/.test(value) || 'Alias contains invalid characters',
+        (value: string) => !isDangerousKey(value) || 'Alias contains dangerous patterns'
+      ]
+    });
+    
+    if (!result.valid) {
+      throw new PulsorValidationError(`Invalid alias: ${result.errors.map(e => e.message).join(', ')}`);
     }
   }
 
   /**
    * Validate Pulser function
    */
-  public validateFunction(fn: unknown): fn is PulserFunction {
-    try {
-      const result = this.validateValue(fn, {
-        type: 'function',
-        required: true,
-        rules: [
-          (value: Function) => {
-            // Check if function is not a constructor
-            const fnStr = value.toString();
-            if (fnStr.includes('class ') || fnStr.startsWith('class')) {
-              return 'Constructor functions are not allowed';
-            }
-            return true;
-          },
-          (value: Function) => {
-            // Security check for dangerous function content
-            const fnStr = value.toString();
-            const dangerousPatterns = [
-              'eval(',
-              'Function(',
-              'setTimeout(',
-              'setInterval(',
-              'require(',
-              'import(',
-              'process.',
-              'global.',
-              'window.'
-            ];
-            
-            for (const pattern of dangerousPatterns) {
-              if (fnStr.includes(pattern)) {
-                return `Function contains potentially dangerous pattern: ${pattern}`;
-              }
-            }
-            return true;
+  public validateFunction(fn: unknown): asserts fn is PulserFunction {
+    const result = this.validateValue(fn, {
+      type: 'function',
+      required: true,
+      rules: [
+        (value: Function) => {
+          // Check if function is not a constructor
+          const fnStr = value.toString();
+          if (fnStr.includes('class ') || fnStr.startsWith('class')) {
+            return 'Constructor functions are not allowed';
           }
-        ]
-      });
-      
-      return result.valid;
-    } catch {
-      return false;
+          return true;
+        },
+        (value: Function) => {
+          // Security check for dangerous function content
+          const fnStr = value.toString();
+          const dangerousPatterns = [
+            'eval(',
+            'Function(',
+            'setTimeout(',
+            'setInterval(',
+            'require(',
+            'import(',
+            'process.',
+            'global.',
+            'window.'
+          ];
+          
+          for (const pattern of dangerousPatterns) {
+            if (fnStr.includes(pattern)) {
+              return `Function contains potentially dangerous pattern: ${pattern}`;
+            }
+          }
+          return true;
+        }
+      ]
+    });
+    
+    if (!result.valid) {
+      throw new PulsorValidationError(`Invalid function: ${result.errors.map(e => e.message).join(', ')}`);
     }
   }
 
   /**
    * Validate callback function
    */
-  public validateCallback(fn: unknown): fn is CallbackFunction {
-    try {
-      const result = this.validateValue(fn, {
-        type: 'function',
-        required: true,
-        rules: [
-          (value: Function) => {
-            // Callback should accept at least one parameter
-            if (value.length === 0) {
-              return 'Callback function must accept at least one parameter';
-            }
-            return true;
+  public validateCallback(callback: unknown): asserts callback is CallbackFunction {
+    const result = this.validateValue(callback, {
+      type: 'function',
+      required: true,
+      rules: [
+        (value: Function) => {
+          // Callback should accept at least one parameter
+          if (value.length === 0) {
+            return 'Callback function must accept at least one parameter';
           }
-        ]
-      });
-      
-      return result.valid;
-    } catch {
-      return false;
+          return true;
+        }
+      ]
+    });
+    
+    if (!result.valid) {
+      throw new PulsorValidationError(`Invalid callback: ${result.errors.map(e => e.message).join(', ')}`);
     }
   }
 
   /**
    * Validate Pulser options
    */
-  public validatePulserOptions(options: unknown): ValidationResult {
+  public validateOptions(options: unknown): asserts options is PulserOptions {
     const schema: Schema = {
       type: 'object',
       required: false,
@@ -329,13 +296,17 @@ export class Validator implements IValidator {
       }
     };
 
-    return this.validateValue(options, schema);
+    const result = this.validateValue(options, schema);
+    
+    if (!result.valid) {
+      throw new PulsorValidationError(`Invalid options: ${result.errors.map(e => e.message).join(', ')}`);
+    }
   }
 
   /**
    * Validate callback options
    */
-  public validateCallbackOptions(options: unknown): ValidationResult {
+  public validateCallbackOptions(options: unknown): asserts options is CallbackOptions {
     const schema: Schema = {
       type: 'object',
       required: false,
@@ -362,7 +333,36 @@ export class Validator implements IValidator {
       }
     };
 
-    return this.validateValue(options, schema);
+    const result = this.validateValue(options, schema);
+    
+    if (!result.valid) {
+      throw new PulsorValidationError(`Invalid callback options: ${result.errors.map(e => e.message).join(', ')}`);
+    }
+  }
+
+  /**
+   * Validate pattern
+   */
+  public validatePattern(pattern: unknown): asserts pattern is string {
+    const result = this.validateValue(pattern, {
+      type: 'string',
+      required: true,
+      rules: [
+        (value: string) => value.length > 0 || 'Pattern cannot be empty',
+        (value: string) => value.length <= 1000 || 'Pattern too long (max 1000 characters)'
+      ]
+    });
+    
+    if (!result.valid) {
+      throw new PulsorValidationError(`Invalid pattern: ${result.errors.map(e => e.message).join(', ')}`);
+    }
+  }
+
+  /**
+   * Sanitize arguments to prevent prototype pollution
+   */
+  public sanitizeArgs<T extends readonly unknown[]>(args: T): T {
+    return args.map(arg => this.sanitize(arg)) as unknown as T;
   }
 
   /**
@@ -558,9 +558,18 @@ export class Validator implements IValidator {
         const rangeErrors = this.validateRange(value, schema, context);
         errors.push(...rangeErrors);
 
-        // Pattern validation
-        const patternErrors = this.validatePattern(value, schema, context);
-        errors.push(...patternErrors);
+        // Pattern validation (inline)
+        if (schema.pattern && typeof value === 'string') {
+          if (!schema.pattern.test(value)) {
+            errors.push({
+              field: context.field,
+              message: `Value does not match required pattern`,
+              code: ERROR_CODES.INVALID_FORMAT,
+              value,
+              path: context.path
+            });
+          }
+        }
 
         // Enum validation
         const enumErrors = this.validateEnum(value, schema, context);
@@ -699,26 +708,7 @@ export class Validator implements IValidator {
     return errors;
   }
 
-  /**
-   * Validate pattern
-   */
-  private validatePattern(value: any, schema: Schema, context: ValidationContext): ValidationError[] {
-    const errors: ValidationError[] = [];
-    
-    if (schema.pattern && typeof value === 'string') {
-      if (!schema.pattern.test(value)) {
-        errors.push({
-          field: context.field,
-          message: `Value does not match required pattern`,
-          code: ERROR_CODES.INVALID_FORMAT,
-          value,
-          path: context.path
-        });
-      }
-    }
 
-    return errors;
-  }
 
   /**
    * Validate enum values
