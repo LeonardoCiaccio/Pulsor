@@ -297,13 +297,13 @@ export function validateCallbackOptions(options: unknown): asserts options is Ca
   
   const opts = options as Record<string, unknown>;
   
-  if ('phase' in opts && opts.phase !== undefined) {
-    if (!['before', 'after', 'error'].includes(opts.phase as string)) {
+  if ('phase' in opts && opts['phase'] !== undefined) {
+    if (!['before', 'after', 'error'].includes(opts['phase'] as string)) {
       throw new PulsorValidationError(
         'phase must be "before", "after", or "error"',
         {
           field: 'callbackOptions.phase',
-          value: opts.phase,
+          value: opts['phase'],
           expectedType: '"before" | "after" | "error"'
         }
       );

@@ -67,7 +67,7 @@ interface StateTransition {
   readonly to: CircuitBreakerState;
   readonly timestamp: number;
   readonly reason: string;
-  readonly metrics?: Partial<CircuitBreakerMetrics>;
+  readonly metrics?: CircuitBreakerMetrics;
 }
 
 /**
@@ -121,7 +121,7 @@ export class CircuitBreaker implements ICircuitBreaker {
   private rejectedCalls = 0;
   private readonly createdAt = nowMs();
   private healthCheckFunction?: HealthCheckFunction;
-  private monitoringTimer?: NodeJS.Timeout;
+  private monitoringTimer?: NodeJS.Timeout | undefined;
   private isDestroyed = false;
 
   constructor(
@@ -274,12 +274,13 @@ export class CircuitBreaker implements ICircuitBreaker {
     
     // Record execution result
     if (this.config.enableMetrics) {
-      this.recordExecution({
+      const executionResult: ExecutionResult = {
         success: false,
         duration: executionDuration,
         timestamp,
-        error: error
-      });
+        ...(error && { error })
+      };
+      this.recordExecution(executionResult);
     }
 
     // Handle state transitions
@@ -565,7 +566,7 @@ export class CircuitBreaker implements ICircuitBreaker {
       to: newState,
       timestamp: nowMs(),
       reason,
-      metrics: this.config.enableMetrics ? this.getMetrics() : undefined
+      ...(this.config.enableMetrics && { metrics: this.getMetrics() })
     };
     
     this.stateHistory.push(transition);

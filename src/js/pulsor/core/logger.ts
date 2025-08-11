@@ -101,13 +101,7 @@ const LEVEL_COLORS: Record<LogLevel, string> = {
 /**
  * Log level priorities (higher number = higher priority)
  */
-const LEVEL_PRIORITIES: Record<LogLevel, number> = {
-  debug: 0,
-  log: 1,
-  info: 2,
-  warn: 3,
-  error: 4
-};
+
 
 // ============================================================================
 // LOGGER IMPLEMENTATION

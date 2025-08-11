@@ -5,6 +5,11 @@
  * @author Pulsor Team
  */
 
+// Import utilities for internal use
+import { globalLogger } from './logger.js';
+import { nowMs } from './utils.js';
+import { normalizeError } from './errors.js';
+
 // ============================================================================
 // ERROR HANDLING
 // ============================================================================
@@ -226,6 +231,10 @@ export class PerformanceMonitor {
   public getActive(): string[] {
     return Array.from(this.measurements.keys());
   }
+  
+  public destroy(): void {
+    this.clear();
+  }
 }
 
 /**
@@ -269,7 +278,8 @@ export class MemoryTracker {
   }
   
   public getLatest(): { timestamp: number; usage: any } | null {
-    return this.snapshots.length > 0 ? this.snapshots[this.snapshots.length - 1] : null;
+    const latest = this.snapshots[this.snapshots.length - 1];
+    return latest || null;
   }
   
   public clear(): void {
