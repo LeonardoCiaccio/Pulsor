@@ -103,34 +103,100 @@ export const validateOptions = (options, source) => {
  * @param {Array<any>} args - Gli argomenti da sanitizzare.
  * @param {boolean} deepClone - Se eseguire una clonazione profonda usando structuredClone. Defaults a false (copia superficiale).
  * @returns {Array<any>} Un nuovo array con gli argomenti sanitizzati (clonati profondamente o copiati superficialmente).
+ * @throws {PulsorError} Se gli argomenti non sono un array valido.
  */
 export const sanitizeArgs = (args, deepClone = false) => {
-  return args.map(arg => {
-    if (typeof arg === 'object' && arg !== null) {
-      if (deepClone) {
-        try {
-          return structuredClone(arg);
-        } catch (e) {
-          // Fallback a copia superficiale se structuredClone fallisce, con un log di avviso.
-          // Questo rende il sistema più resiliente, ma la clonazione profonda potrebbe essere compromessa.
-          // safeLog deve essere importato o passato se necessario.
-          // Per ora, assumiamo che safeLog sia disponibile o che questa funzione sia usata in un contesto dove lo è.
-          // Se safeLog non è disponibile qui, si dovrebbe usare console.warn o un meccanismo di log alternativo.
-          console.warn(`[Pulsor] Impossibile clonare profondamente l'argomento (tipo: ${typeof arg}). Fallback a copia superficiale. Errore: ${e.message}`, { argType: typeof arg, error: e.message, argValue: arg });
+  // Validazione rigorosa degli input
+  if (!Array.isArray(args)) {
+    throw new PulsorError('Gli argomenti devono essere forniti come array');
+  }
+  
+  // Controllo di sicurezza per array molto grandi
+  if (args.length > 1000) {
+    console.warn('[Pulsor] Array di argomenti molto grande (>1000 elementi). Possibile problema di performance.');
+  }
+  
+  return args.map((arg, index) => {
+    try {
+      // Controllo per valori pericolosi
+      if (arg && typeof arg === 'object') {
+        // Prevenzione prototype pollution
+        if (DANGEROUS_KEYS.some(key => Object.prototype.hasOwnProperty.call(arg, key))) {
+          console.warn(`[Pulsor] Rilevata chiave pericolosa nell'argomento ${index}. Rimozione delle chiavi pericolose.`);
+          const sanitized = Array.isArray(arg) ? [...arg] : { ...arg };
+          DANGEROUS_KEYS.forEach(key => delete sanitized[key]);
+          return sanitized;
+        }
+        
+        if (deepClone) {
+          // Controllo disponibilità structuredClone
+          if (typeof structuredClone === 'undefined') {
+            console.warn('[Pulsor] structuredClone non disponibile. Fallback a copia superficiale.');
+            return Array.isArray(arg) ? [...arg] : { ...arg };
+          }
+          
+          try {
+            return structuredClone(arg);
+          } catch (cloneError) {
+            console.warn(`[Pulsor] Impossibile clonare profondamente l'argomento ${index} (tipo: ${typeof arg}). Fallback a copia superficiale. Errore: ${cloneError.message}`);
+            return Array.isArray(arg) ? [...arg] : { ...arg };
+          }
+        } else {
+          // Copia superficiale sicura
           return Array.isArray(arg) ? [...arg] : { ...arg };
         }
-      } else {
-          // Per deepClone=false, si esegue una copia superficiale per gli oggetti.
-          // Questo previene la modifica diretta dell'oggetto originale, ma non degli oggetti annidati.
-          // Si usa Object.assign per una copia superficiale che gestisce anche array e altri oggetti iterabili.
-          return Array.isArray(arg) ? [...arg] : { ...arg };
-        }
+      }
+      
+      // Per tipi primitivi, restituisci il valore così com'è
+      return arg;
+      
+    } catch (sanitizeError) {
+      console.error(`[Pulsor] Errore durante la sanitizzazione dell'argomento ${index}:`, sanitizeError.message);
+      // In caso di errore, restituisci undefined per sicurezza
+      return undefined;
     }
-    return arg;
   });
 };
 
-export const nowMs = () => Date.now();
+/**
+ * Restituisce il timestamp corrente in millisecondi con gestione degli errori.
+ * Fornisce un fallback sicuro in caso di problemi con Date.now().
+ * @returns {number} Il timestamp corrente in millisecondi.
+ */
+export const nowMs = () => {
+  try {
+    const timestamp = Date.now();
+    
+    // Validazione del risultato
+    if (typeof timestamp !== 'number' || !Number.isFinite(timestamp) || timestamp < 0) {
+      console.warn('[Pulsor] Date.now() ha restituito un valore non valido. Usando performance.now() come fallback.');
+      
+      // Fallback a performance.now() se disponibile
+      if (typeof performance !== 'undefined' && typeof performance.now === 'function') {
+        const perfTime = performance.now();
+        // performance.now() restituisce il tempo relativo, quindi aggiungiamo un offset approssimativo
+        return Math.floor(perfTime + 1640995200000); // Offset approssimativo per 2022
+      }
+      
+      // Ultimo fallback: costruzione manuale del timestamp
+      return Math.floor(new Date().getTime());
+    }
+    
+    return timestamp;
+    
+  } catch (error) {
+    console.error('[Pulsor] Errore critico nel recupero del timestamp:', error.message);
+    
+    // Fallback di emergenza
+    try {
+      return Math.floor(new Date().getTime());
+    } catch (fallbackError) {
+      console.error('[Pulsor] Anche il fallback del timestamp è fallito:', fallbackError.message);
+      // Ultimo resort: timestamp fisso (non ideale ma previene crash)
+      return 1640995200000; // 1 gennaio 2022
+    }
+  }
+};
 
 /**
  * Converte un pattern (stringa o RegExp) in un oggetto RegExp.

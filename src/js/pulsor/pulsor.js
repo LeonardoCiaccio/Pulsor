@@ -13,10 +13,27 @@
  * - v5.0.0: Major hardening release.
  */
 
-import { Logger } from './logger.class.js';
+// --- Gestione sicura degli import con validazione ---
+try {
+  var { Logger } = await import('./logger.class.js');
+} catch (importError) {
+  console.error('[Pulsor] ERRORE CRITICO: Impossibile importare Logger:', importError.message);
+  throw new Error(`Dipendenza mancante: logger.class.js - ${importError.message}`);
+}
 
-import { AsyncLock } from './async-lock.class.js';
-import { PulsorError, PulsorStoppedError } from './errors.class.js';
+try {
+  var { AsyncLock } = await import('./async-lock.class.js');
+} catch (importError) {
+  console.error('[Pulsor] ERRORE CRITICO: Impossibile importare AsyncLock:', importError.message);
+  throw new Error(`Dipendenza mancante: async-lock.class.js - ${importError.message}`);
+}
+
+try {
+  var { PulsorError, PulsorStoppedError } = await import('./errors.class.js');
+} catch (importError) {
+  console.error('[Pulsor] ERRORE CRITICO: Impossibile importare classi di errore:', importError.message);
+  throw new Error(`Dipendenza mancante: errors.class.js - ${importError.message}`);
+}
 
 // --- Core exports and symbols ---
 export const PULSOR_STOP = Symbol('PULSOR_STOP');
@@ -26,15 +43,22 @@ const Prefix = '[Pulsor]';
 const LoggerServices = { log: true, error: true, warn: true, debug: false, info: true };
 const Loggy = new Logger(Prefix, LoggerServices);
 
-const createStructuredLog = (event, data = {}) => ({
-  timestamp: new Date().toISOString(),
-  event,
-  ...data
-});
+const createStructuredLog = (event, data = {}) => {
+  // Lazy evaluation per evitare overhead quando il logging è disabilitato
+  if (!Loggy.services[event] && !Loggy.services.log) return null;
+  return {
+    timestamp: new Date().toISOString(),
+    event,
+    ...data
+  };
+};
 
 const safeLog = (level, event, data = {}) => {
   try {
-    Loggy[level](event, createStructuredLog(event, data));
+    const logData = createStructuredLog(event, data);
+    if (logData) {
+      Loggy[level](event, logData);
+    }
   } catch (loggingError) {
     console.error(`[Pulsor] Logging failed for event '${event}' at level '${level}':`, loggingError);
     console.log('[Pulsor] Original data:', data);
@@ -43,8 +67,20 @@ const safeLog = (level, event, data = {}) => {
 
 // --- Constants and Defaults ---
 
-import { validateAlias, validateFunction, validateOptions, sanitizeArgs, nowMs, toRegex, DEFAULT_OPTIONS, MAX_PATTERN_CALLBACKS } from './utils.js';
-import { CircuitBreaker } from './circuit-breaker.class.js';
+// --- Import delle utility con gestione errori ---
+try {
+  var { validateAlias, validateFunction, validateOptions, sanitizeArgs, nowMs, toRegex, DEFAULT_OPTIONS, MAX_PATTERN_CALLBACKS } = await import('./utils.js');
+} catch (importError) {
+  console.error('[Pulsor] ERRORE CRITICO: Impossibile importare utilities:', importError.message);
+  throw new Error(`Dipendenza mancante: utils.js - ${importError.message}`);
+}
+
+try {
+  var { CircuitBreaker } = await import('./circuit-breaker.class.js');
+} catch (importError) {
+  console.error('[Pulsor] ERRORE CRITICO: Impossibile importare CircuitBreaker:', importError.message);
+  throw new Error(`Dipendenza mancante: circuit-breaker.class.js - ${importError.message}`);
+}
 
 // --- Pulser Class ---
 
@@ -67,6 +103,19 @@ export class Pulser {
     this.#manager = manager;
     if (!this.#manager.getEntry(this.#alias)) {
       throw new PulsorError(`Pulser '${this.#alias}' is not registered.`);
+    }
+  }
+
+  /**
+   * Emette un evento tramite il manager
+   * @param {string} event - Nome dell'evento
+   * @param {any} data - Dati da emettere
+   * @private
+   */
+  #emit(event, data) {
+    // Delega l'emissione dell'evento al manager tramite metodo pubblico
+    if (typeof this.#manager.emitEvent === 'function') {
+      this.#manager.emitEvent(event, { ...data, pulserAlias: this.#alias });
     }
   }
 
@@ -108,6 +157,38 @@ export class Pulser {
       throw new PulsorError('Il primo argomento di `binds` deve essere un array di callback o oggetti callback.');
     }
 
+    // Validazione rigorosa delle opzioni globali
+    if (globalOptions !== null && (typeof globalOptions !== 'object' || Array.isArray(globalOptions))) {
+      throw new PulsorError('Le opzioni globali devono essere un oggetto valido (non array o null).');
+    }
+
+    // Validazione delle chiavi delle opzioni globali
+    const validOptionKeys = ['phase', 'priority', 'once', 'ttl'];
+    const globalKeys = Object.keys(globalOptions);
+    const invalidGlobalKeys = globalKeys.filter(key => !validOptionKeys.includes(key));
+
+    if (invalidGlobalKeys.length > 0) {
+      throw new PulsorError(`Chiavi non valide nelle opzioni globali: ${invalidGlobalKeys.join(', ')}. Chiavi valide: ${validOptionKeys.join(', ')}.`);
+    }
+
+    // Validazione dei valori delle opzioni globali
+    if (globalOptions.phase && !['before', 'after', 'error'].includes(globalOptions.phase)) {
+      throw new PulsorError(`Fase non valida nelle opzioni globali: '${globalOptions.phase}'. Fasi valide: before, after, error.`);
+    }
+
+    if (globalOptions.priority !== undefined && (typeof globalOptions.priority !== 'number' || !Number.isFinite(globalOptions.priority))) {
+      throw new PulsorError('La priorità nelle opzioni globali deve essere un numero finito.');
+    }
+
+    if (globalOptions.ttl !== undefined && (typeof globalOptions.ttl !== 'number' || globalOptions.ttl <= 0)) {
+      throw new PulsorError('Il TTL nelle opzioni globali deve essere un numero positivo.');
+    }
+
+    if (callbacks.length === 0) {
+      safeLog('warn', 'Array callbacks vuoto fornito a binds()');
+      return { unbinders: [], errors: [] };
+    }
+
     const results = { unbinders: [], errors: [] };
 
     callbacks.forEach((item, index) => {
@@ -117,22 +198,81 @@ export class Pulser {
 
         if (typeof item === 'function') {
           callbackFn = item;
-        } else if (typeof item === 'object' && item !== null && typeof item.fn === 'function') {
+        } else if (typeof item === 'object' && item !== null && !Array.isArray(item) && typeof item.fn === 'function') {
           callbackFn = item.fn;
+
+          // Validazione rigorosa delle opzioni dell'item
+          if (item.options !== undefined) {
+            if (typeof item.options !== 'object' || item.options === null || Array.isArray(item.options)) {
+              throw new PulsorError(`Le opzioni all'indice ${index} devono essere un oggetto valido (non array o null).`);
+            }
+
+            // Validazione delle chiavi delle opzioni dell'item
+            const itemKeys = Object.keys(item.options);
+            const invalidItemKeys = itemKeys.filter(key => !validOptionKeys.includes(key));
+            if (invalidItemKeys.length > 0) {
+              throw new PulsorError(`Chiavi non valide nelle opzioni all'indice ${index}: ${invalidItemKeys.join(', ')}. Chiavi valide: ${validOptionKeys.join(', ')}.`);
+            }
+
+            // Validazione dei valori delle opzioni dell'item
+            if (item.options.phase && !['before', 'after', 'error'].includes(item.options.phase)) {
+              throw new PulsorError(`Fase non valida all'indice ${index}: '${item.options.phase}'. Fasi valide: before, after, error.`);
+            }
+
+            if (item.options.priority !== undefined && (typeof item.options.priority !== 'number' || !Number.isFinite(item.options.priority))) {
+              throw new PulsorError(`Priorità non valida all'indice ${index}: deve essere un numero finito.`);
+            }
+
+            if (item.options.ttl !== undefined && (typeof item.options.ttl !== 'number' || item.options.ttl <= 0)) {
+              throw new PulsorError(`TTL non valido all'indice ${index}: deve essere un numero positivo.`);
+            }
+          }
+
           optionsToApply = { ...globalOptions, ...item.options };
         } else {
           throw new PulsorError(`Elemento non valido all'indice ${index}. Ogni elemento deve essere una funzione o un oggetto { fn: Function, options?: Object }.`);
         }
 
+        // Validazione aggiuntiva della callback
+        if (typeof callbackFn !== 'function') {
+          throw new PulsorError(`Callback non valida all'indice ${index}: deve essere una funzione.`);
+        }
+
         const unbinder = this.bind(callbackFn, optionsToApply);
         results.unbinders.push(unbinder);
+
+        safeLog('debug', `Callback associata con successo all'indice ${index}`, {
+          callbackName: callbackFn.name || 'anonymous',
+          options: optionsToApply
+        });
+
       } catch (error) {
-        results.errors.push({
+        const errorInfo = {
           index,
-          item,
+          item: typeof item === 'function' ? { fn: item.name || 'anonymous' } : { ...item, fn: item?.fn?.name || 'anonymous' },
           error: new PulsorError(`Impossibile associare la callback all'indice ${index}: ${error.message}`, error)
+        };
+
+        results.errors.push(errorInfo);
+
+        safeLog('error', `Errore nell'associazione della callback all'indice ${index}`, {
+          error: error.message,
+          item: errorInfo.item
         });
       }
+    });
+
+    // Emetti evento con statistiche
+    this.#emit('bindsCompleted', {
+      total: callbacks.length,
+      successful: results.unbinders.length,
+      failed: results.errors.length,
+      errors: results.errors.map(e => ({ index: e.index, error: e.error.message }))
+    });
+
+    safeLog('info', `Completato binds() per ${callbacks.length} callback`, {
+      successful: results.unbinders.length,
+      failed: results.errors.length
     });
 
     return results;
@@ -168,8 +308,6 @@ export class PulsorManager {
   #registry = new Map();
   #patternCallbacks = [];
   #patternIdCounter = 0;
-
-
 
   #eventListeners = new Map();
 
@@ -296,11 +434,12 @@ export class PulsorManager {
     let lock;
     if (entry.options.preventConcurrentExecution) {
       lock = this.#getOrCreateLock(alias);
-      // Tentativo di acquisire il lock con un timeout per evitare blocchi indefiniti
+      // Timeout separato per l'acquisizione del lock (max 5 secondi o metà del timeout totale)
+      const lockTimeout = Math.min(5000, Math.floor(entry.options.timeout / 2));
       try {
-        await lock.acquire(entry.options.timeout); // Usa il timeout del pulser per l'acquisizione del lock
+        await lock.acquire(lockTimeout);
       } catch (e) {
-        const error = new PulsorError(`Pulser '${alias}' failed to acquire lock: ${e.message}`, e);
+        const error = new PulsorError(`Pulser '${alias}' failed to acquire lock within ${lockTimeout}ms: ${e.message}`, e);
         this.#emit('pulseError', { alias, error });
         throw error;
       }
@@ -395,7 +534,7 @@ export class PulsorManager {
           const abortError = new DOMException('Execution aborted due to timeout', 'AbortError');
           throw new PulsorError(`Pulse for '${alias}' timed out after ${entry.options.timeout}ms.`, { cause: abortError });
         }
-        result = await entry.fn(...currentArgs);
+        result = await entry.pulseFn(...currentArgs);
       } catch (fnError) {
         if (fnError instanceof DOMException && fnError.name === 'AbortError') {
           throw new PulsorError(`Pulse for '${alias}' was aborted.`, { cause: fnError });
@@ -413,9 +552,35 @@ export class PulsorManager {
       const duration = nowMs() - startedAt;
       this.#emit('pulseCompleted', { executionId, alias, status: 'error', duration, attempt, error });
       safeLog('error', 'PulseCompleted', { executionId, alias, status: 'error', duration, attempt, error: error.message });
+
+      // Esegui callback di errore se configurato
+      if (entry.options.errorCallbacksBeforeThrow) {
+        try {
+          await this.#executePhaseCallbacks(executionId, 'error', entry, currentArgs, { error, alias, attempt });
+        } catch (callbackError) {
+          safeLog('warn', 'Error callback failed', { alias, callbackError: callbackError.message });
+        }
+      }
+
       throw error;
     } finally {
-      clearTimeout(timeoutId);
+      // Cleanup esplicito per prevenire memory leak
+      if (timeoutId) {
+        clearTimeout(timeoutId);
+        timeoutId = null;
+      }
+
+      // Cleanup AbortController
+      if (abortController) {
+        try {
+          if (!abortController.signal.aborted) {
+            abortController.abort();
+          }
+        } catch (cleanupError) {
+          safeLog('warn', 'AbortController cleanup failed', { alias, error: cleanupError.message });
+        }
+      }
+
       this.#activeExecutions.delete(executionId);
     }
   }
@@ -519,6 +684,28 @@ export class PulsorManager {
       entry.metrics.pulseCount++;
       entry.metrics.totalDuration += duration;
       entry.metrics.lastPulsedAt = nowMs();
+      entry.metrics.avgDuration = entry.metrics.totalDuration / entry.metrics.pulseCount;
+    }
+
+    // Aggiorna le metriche globali con controllo del memory leak
+    if (this.#performanceMetrics) {
+      this.#recordPerformanceMetric(duration);
+    }
+  }
+
+  /**
+   * Records a performance metric with automatic cleanup to prevent memory leaks.
+   * @param {number} duration - The duration to record.
+   * @private
+   */
+  #recordPerformanceMetric(duration) {
+    if (!this.#performanceMetrics) return;
+
+    this.#performanceMetrics.durations.push(duration);
+
+    // Prevenzione memory leak: mantieni solo le ultime N misurazioni
+    if (this.#performanceMetrics.durations.length > this.#performanceMetrics.maxWindowSize) {
+      this.#performanceMetrics.durations.shift();
     }
   }
 
@@ -600,7 +787,7 @@ export class PulsorManager {
 
     const memoryPressure = {
       patternCallbacks: this.#patternCallbacks.length,
-  
+
       eventListeners: Array.from(this.#eventListeners.values()).reduce((sum, arr) => sum + arr.length, 0)
     };
 
@@ -623,11 +810,27 @@ export class PulsorManager {
 
   // --- Circuit Breaker Management ---
 
+  /**
+   * Retrieves or creates a circuit breaker with thread-safe implementation.
+   * @param {string} alias - The alias of the pulser.
+   * @param {number} threshold - The failure threshold.
+   * @returns {CircuitBreaker} The circuit breaker instance.
+   * @private
+   */
   #getOrCreateCircuitBreaker(alias, threshold) {
-    if (!this.#circuitBreakers.has(alias)) {
-      this.#circuitBreakers.set(alias, new CircuitBreaker(threshold));
+    // Thread-safe check-and-create pattern
+    let breaker = this.#circuitBreakers.get(alias);
+    if (!breaker) {
+      breaker = new CircuitBreaker(threshold);
+      // Double-check in caso di race condition
+      if (!this.#circuitBreakers.has(alias)) {
+        this.#circuitBreakers.set(alias, breaker);
+      } else {
+        // Se nel frattempo è stato creato da un altro thread, usa quello esistente
+        breaker = this.#circuitBreakers.get(alias);
+      }
     }
-    return this.#circuitBreakers.get(alias);
+    return breaker;
   }
 
   /**
@@ -712,7 +915,52 @@ export class PulsorManager {
    * This method is called internally to manage pattern lifecycle.
    * @private
    */
-  cleanupExpiredPatterns() { const now = nowMs(); const initialCount = this.#patternCallbacks.length; this.#patternCallbacks = this.#patternCallbacks.filter(p => !p.options.ttl || (now - p.addedAt) < p.options.ttl); if (initialCount > this.#patternCallbacks.length) { this.#emit('patternsCleaned', { removed: initialCount - this.#patternCallbacks.length }); } }
+  cleanupExpiredPatterns() {
+    // Validazione sicura della funzione nowMs
+    let now;
+    try {
+      if (typeof nowMs !== 'function') {
+        throw new Error('nowMs non è una funzione valida');
+      }
+      now = nowMs();
+      if (typeof now !== 'number' || !Number.isFinite(now)) {
+        throw new Error('nowMs ha restituito un valore non valido');
+      }
+    } catch (timeError) {
+      safeLog('error', 'Errore nel recupero del timestamp', { error: timeError.message });
+      now = Date.now(); // Fallback sicuro
+    }
+    
+    const expiredPatterns = [];
+
+    try {
+      // Identifica i pattern scaduti senza modificare l'array durante l'iterazione
+      this.#patternCallbacks.forEach((p, index) => {
+        if (p.options.ttl && (now - p.addedAt) >= p.options.ttl) {
+          expiredPatterns.push({ index, id: p.id, pattern: p.regex.source });
+        }
+      });
+
+      // Rimuovi i pattern scaduti in ordine inverso per mantenere gli indici validi
+      expiredPatterns.reverse().forEach(({ index, id, pattern }) => {
+        this.#patternCallbacks.splice(index, 1);
+        safeLog('debug', `Pattern scaduto rimosso: ${id}`, { pattern, age: now - this.#patternCallbacks[index]?.addedAt });
+      });
+
+      if (expiredPatterns.length > 0) {
+        this.#emit('patternsCleaned', {
+          removed: expiredPatterns.length,
+          removedPatterns: expiredPatterns.map(p => p.id)
+        });
+      }
+
+    } catch (error) {
+      safeLog('error', 'Errore durante la pulizia dei pattern scaduti', {
+        error: error.message,
+        stack: error.stack
+      });
+    }
+  }
   /**
    * Binds a callback function to a pattern, which will be executed when a Pulser matching the pattern is pulsed.
    * @param {string} pattern - A glob-style pattern to match Pulser aliases (e.g., 'my.service.*').
@@ -725,7 +973,87 @@ export class PulsorManager {
    * @returns {string} A unique ID for the pattern binding.
    * @throws {PulsorError} If the maximum pattern callbacks limit is exceeded or callback is not a function.
    */
-  bindToPattern(pattern, callback, options = {}) { const id = `p${++this.#patternIdCounter}-${nowMs()}`; if (this.#patternCallbacks.length > MAX_PATTERN_CALLBACKS) { throw new PulsorError(`Maximum pattern callbacks limit (${MAX_PATTERN_CALLBACKS}) exceeded`); } if (this.#patternCallbacks.length > 100 && Math.random() < 0.1) { this.cleanupExpiredPatterns(); } this.#patternCallbacks.push({ id, regex: toRegex(pattern), callback: validateFunction(callback), addedAt: nowMs(), options: { phase: 'after', priority: 0, once: false, ttl: null, ...options } }); this.#emit('patternBound', { pattern, id }); return id; }
+  bindToPattern(pattern, callback, options = {}) {
+    // Validazione rigorosa del pattern
+    if (typeof pattern !== 'string' || pattern.trim() === '') {
+      throw new PulsorError('Il pattern deve essere una stringa non vuota');
+    }
+
+    const validatedCallback = validateFunction(callback, 'Pattern callback');
+    
+    // Generazione sicura dell'ID con gestione errori
+    let timestamp;
+    try {
+      timestamp = typeof nowMs === 'function' ? nowMs() : Date.now();
+    } catch (timeError) {
+      safeLog('warn', 'Errore nel recupero timestamp per ID pattern', { error: timeError.message });
+      timestamp = Date.now();
+    }
+    
+    const id = `p${++this.#patternIdCounter}-${timestamp}`;
+
+    if (this.#patternCallbacks.length > MAX_PATTERN_CALLBACKS) {
+      throw new PulsorError(`Limite massimo pattern callbacks (${MAX_PATTERN_CALLBACKS}) superato`);
+    }
+
+    try {
+      // Test del pattern per verificare che sia valido
+      const testRegex = toRegex(pattern);
+
+      // Avviso per pattern troppo permissivi
+      if (pattern === '.*' || pattern === '.+' || pattern === '*') {
+        safeLog('warn', 'Pattern molto permissivo rilevato', { pattern });
+      }
+
+      // Validazione delle opzioni
+      const validatedOptions = {
+        phase: ['before', 'after', 'error'].includes(options.phase) ? options.phase : 'after',
+        priority: typeof options.priority === 'number' ? options.priority : 0,
+        once: Boolean(options.once),
+        ttl: typeof options.ttl === 'number' && options.ttl > 0 ? options.ttl : null
+      };
+
+      if (this.#patternCallbacks.length > 100 && Math.random() < 0.1) {
+        this.cleanupExpiredPatterns();
+      }
+
+      // Aggiunta sicura del pattern callback
+      let addedAtTimestamp;
+      try {
+        addedAtTimestamp = typeof nowMs === 'function' ? nowMs() : Date.now();
+      } catch (timeError) {
+        safeLog('warn', 'Errore nel recupero timestamp per pattern callback', { error: timeError.message });
+        addedAtTimestamp = Date.now();
+      }
+      
+      this.#patternCallbacks.push({
+        id,
+        regex: testRegex,
+        callback: validatedCallback,
+        addedAt: addedAtTimestamp,
+        options: validatedOptions,
+        originalPattern: pattern // Per debug
+      });
+
+      this.#emit('patternBound', { pattern, id, options: validatedOptions });
+
+      safeLog('debug', `Pattern associato: ${id}`, {
+        pattern,
+        phase: validatedOptions.phase,
+        ttl: validatedOptions.ttl
+      });
+
+      return id;
+
+    } catch (regexError) {
+      const error = new PulsorError(`Pattern non valido: ${regexError.message}`, regexError);
+      safeLog('error', 'Errore nella creazione del pattern', {
+        pattern,
+        error: regexError.message
+      });
+      throw error;
+    }
+  }
   /**
    * Unbinds a pattern callback using its unique ID.
    * @param {string} id - The unique ID of the pattern binding to unbind.
@@ -742,7 +1070,32 @@ export class PulsorManager {
    * @param {boolean} [options.once=false] - If true, the callback will only execute once.
    * @throws {PulsorError} If the Pulser does not exist, the phase is invalid, or the callback is already bound.
    */
-  bindCallback(alias, callback, options) { const entry = this.getEntry(alias); if (!entry) throw new PulsorError(`Pulser '${alias}' is not registered.`); const phase = options.phase || 'after'; const bag = entry.callbacks[phase]; if (!bag) throw new PulsorError(`Invalid phase '${phase}' for '${alias}'.`); if (bag.has(callback)) throw new PulsorError(`Callback is already bound to '${alias}' [${phase}].`); bag.set(callback, { fn: callback, priority: Number.isFinite(options.priority) ? options.priority : 0, once: !!options.once, addedAt: nowMs(), functionName: callback.name || 'anonymous' }); }
+  bindCallback(alias, callback, options) { 
+    const entry = this.getEntry(alias); 
+    if (!entry) throw new PulsorError(`Pulser '${alias}' is not registered.`); 
+    
+    const phase = options.phase || 'after'; 
+    const bag = entry.callbacks[phase]; 
+    if (!bag) throw new PulsorError(`Invalid phase '${phase}' for '${alias}'.`); 
+    if (bag.has(callback)) throw new PulsorError(`Callback is already bound to '${alias}' [${phase}].`); 
+    
+    // Generazione sicura del timestamp
+    let addedAtTimestamp;
+    try {
+      addedAtTimestamp = typeof nowMs === 'function' ? nowMs() : Date.now();
+    } catch (timeError) {
+      safeLog('warn', 'Errore nel recupero timestamp per callback binding', { error: timeError.message });
+      addedAtTimestamp = Date.now();
+    }
+    
+    bag.set(callback, { 
+      fn: callback, 
+      priority: Number.isFinite(options.priority) ? options.priority : 0, 
+      once: !!options.once, 
+      addedAt: addedAtTimestamp, 
+      functionName: callback.name || 'anonymous' 
+    }); 
+  }
   /**
    * Unbinds a previously bound callback function from a specific Pulser instance.
    * @param {string} alias - The alias of the Pulser to unbind the callback from.
@@ -827,16 +1180,32 @@ export class PulsorManager {
  * @throws {PulsorError} If the callback is not a function.
  */
   on(event, callback) {
-    if (!this.#eventListeners.has(event)) this.#eventListeners.set(event, []);
-    const listeners = this.#eventListeners.get(event);
+    const validatedCallback = validateFunction(callback, 'Event callback');
 
-    // Prevent memory leaks by limiting listeners per event
-    if (listeners.length >= 50) {
-      safeLog('warn', `Too many listeners for event '${event}'. Removing oldest listeners.`);
-      listeners.splice(0, 10); // Remove oldest 10 listeners
+    if (!this.#eventListeners.has(event)) {
+      this.#eventListeners.set(event, []);
     }
 
-    listeners.push(validateFunction(callback));
+    const listeners = this.#eventListeners.get(event);
+
+    // Prevenzione memory leak: controlla duplicati
+    if (listeners.includes(validatedCallback)) {
+      safeLog('warn', `Callback già registrata per l'evento '${event}'. Ignorata.`);
+      return;
+    }
+
+    // Prevenzione memory leak: limita il numero di listener per evento
+    if (listeners.length >= 50) {
+      safeLog('warn', `Troppi listener per l'evento '${event}'. Rimozione dei più vecchi.`);
+      listeners.splice(0, 10); // Rimuovi i 10 listener più vecchi
+    }
+
+    listeners.push(validatedCallback);
+
+    safeLog('debug', `Listener aggiunto per evento '${event}'`, {
+      totalListeners: listeners.length,
+      callbackName: validatedCallback.name || 'anonymous'
+    });
   }
 
   /**
@@ -872,22 +1241,55 @@ export class PulsorManager {
     const listeners = this.#eventListeners.get(event);
     if (!listeners || listeners.length === 0) return;
 
-    // Create a copy to avoid issues if listeners are modified during emission
+    // Crea una copia per evitare problemi se i listener vengono modificati durante l'emissione
     const listenersCopy = [...listeners];
+    const problematicListeners = [];
 
     listenersCopy.forEach(cb => {
       try {
-        cb(data);
+        // Timeout per prevenire listener che si bloccano
+        const timeoutPromise = new Promise((_, reject) => {
+          setTimeout(() => reject(new Error('Listener timeout')), 1000);
+        });
+
+        const listenerPromise = Promise.resolve(cb(data));
+
+        // Non aspettiamo il risultato per mantenere l'emissione sincrona
+        Promise.race([listenerPromise, timeoutPromise]).catch(e => {
+          safeLog('error', `Errore nel listener per evento '${event}'`, {
+            error: e.message,
+            callbackName: cb.name || 'anonymous'
+          });
+          problematicListeners.push(cb);
+        });
+
       } catch (e) {
-        safeLog('error', `Error in '${event}' event listener`, { error: e.message, stack: e.stack });
-        // Remove problematic listeners to prevent repeated errors
+        safeLog('error', `Errore sincrono nel listener per evento '${event}'`, {
+          error: e.message,
+          stack: e.stack,
+          callbackName: cb.name || 'anonymous'
+        });
+        problematicListeners.push(cb);
+      }
+    });
+
+    // Rimuovi listener problematici per prevenire errori ripetuti
+    if (problematicListeners.length > 0) {
+      problematicListeners.forEach(cb => {
         const index = listeners.indexOf(cb);
         if (index > -1) {
           listeners.splice(index, 1);
-          safeLog('warn', `Removed problematic listener for event '${event}'`);
+          safeLog('warn', `Rimosso listener problematico per evento '${event}'`, {
+            callbackName: cb.name || 'anonymous'
+          });
         }
+      });
+
+      // Pulisci l'array se è vuoto
+      if (listeners.length === 0) {
+        this.#eventListeners.delete(event);
       }
-    });
+    }
   }
   /**
    * Retrieves global performance metrics and statistics for all Pulsers managed by the PulsorManager.
@@ -927,7 +1329,7 @@ export class PulsorManager {
       activeExecutions: this.#activeExecutions.size,
 
       memoryUsage: {
-    
+
         performanceMetrics: durations.length,
         circuitBreakers: this.#circuitBreakers.size
       }
@@ -944,6 +1346,15 @@ export class PulsorManager {
   PulserExists(alias) {
     const aliasValidated = validateAlias(alias);
     return this.#registry.has(aliasValidated);
+  }
+
+  /**
+   * Metodo pubblico per emettere eventi, utilizzato dalla classe Pulser
+   * @param {string} event - Nome dell'evento
+   * @param {any} data - Dati da emettere
+   */
+  emitEvent(event, data) {
+    this.#emit(event, data);
   }
 
 
