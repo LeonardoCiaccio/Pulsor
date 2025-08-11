@@ -20,7 +20,7 @@ export class PulsorError extends Error {
   public readonly code: string;
   
   /** Original error that caused this error (if any) */
-  public readonly cause?: Error;
+  public override readonly cause?: Error;
   
   /** Additional context data */
   public readonly context: Record<string, unknown>;
@@ -43,10 +43,14 @@ export class PulsorError extends Error {
     
     this.name = this.constructor.name;
     this.code = options.code ?? 'PULSOR_ERROR';
-    this.cause = options.cause;
+    if (options.cause !== undefined) {
+      this.cause = options.cause;
+    }
     this.context = options.context ?? {};
     this.timestamp = new Date().toISOString();
-    this.originalStack = options.cause?.stack;
+    if (options.cause?.stack !== undefined) {
+      this.originalStack = options.cause.stack;
+    }
     
     // Maintain proper stack trace
     if (Error.captureStackTrace) {
@@ -124,16 +128,20 @@ export class PulsorStoppedError extends PulsorError {
   ) {
     super(message, {
       code: 'PULSOR_STOPPED',
-      cause: options.cause,
+      ...(options.cause !== undefined && { cause: options.cause }),
       context: {
         ...options.context,
-        pulserAlias: options.pulserAlias,
-        executionId: options.executionId
+        ...(options.pulserAlias !== undefined && { pulserAlias: options.pulserAlias }),
+        ...(options.executionId !== undefined && { executionId: options.executionId })
       }
     });
     
-    this.pulserAlias = options.pulserAlias;
-    this.executionId = options.executionId;
+    if (options.pulserAlias !== undefined) {
+      this.pulserAlias = options.pulserAlias;
+    }
+    if (options.executionId !== undefined) {
+      this.executionId = options.executionId;
+    }
   }
 }
 
@@ -157,18 +165,22 @@ export class PulsorValidationError extends PulsorError {
   ) {
     super(message, {
       code: 'PULSOR_VALIDATION_ERROR',
-      cause: options.cause,
+      ...(options.cause !== undefined && { cause: options.cause }),
       context: {
         ...options.context,
-        field: options.field,
+        ...(options.field !== undefined && { field: options.field }),
         value: options.value,
-        expectedType: options.expectedType
+        ...(options.expectedType !== undefined && { expectedType: options.expectedType })
       }
     });
     
-    this.field = options.field;
+    if (options.field !== undefined) {
+      this.field = options.field;
+    }
     this.value = options.value;
-    this.expectedType = options.expectedType;
+    if (options.expectedType !== undefined) {
+      this.expectedType = options.expectedType;
+    }
   }
 }
 
@@ -191,18 +203,22 @@ export class PulsorTimeoutError extends PulsorError {
   ) {
     super(`Operation timed out after ${timeoutMs}ms`, {
       code: 'PULSOR_TIMEOUT',
-      cause: options.cause,
+      ...(options.cause !== undefined && { cause: options.cause }),
       context: {
         ...options.context,
         timeoutMs,
-        pulserAlias: options.pulserAlias,
-        executionId: options.executionId
+        ...(options.pulserAlias !== undefined && { pulserAlias: options.pulserAlias }),
+        ...(options.executionId !== undefined && { executionId: options.executionId })
       }
     });
     
     this.timeoutMs = timeoutMs;
-    this.pulserAlias = options.pulserAlias;
-    this.executionId = options.executionId;
+    if (options.pulserAlias !== undefined) {
+      this.pulserAlias = options.pulserAlias;
+    }
+    if (options.executionId !== undefined) {
+      this.executionId = options.executionId;
+    }
   }
 }
 
@@ -221,7 +237,7 @@ export class PulsorNotFoundError extends PulsorError {
   ) {
     super(`Pulser '${pulserAlias}' not found`, {
       code: 'PULSOR_NOT_FOUND',
-      cause: options.cause,
+      ...(options.cause !== undefined && { cause: options.cause }),
       context: {
         ...options.context,
         pulserAlias
@@ -247,7 +263,7 @@ export class PulsorAlreadyExistsError extends PulsorError {
   ) {
     super(`Pulser '${pulserAlias}' already exists`, {
       code: 'PULSOR_ALREADY_EXISTS',
-      cause: options.cause,
+      ...(options.cause !== undefined && { cause: options.cause }),
       context: {
         ...options.context,
         pulserAlias
@@ -279,7 +295,7 @@ export class PulsorCircuitBreakerError extends PulsorError {
       `Circuit breaker is open for '${pulserAlias}' (${failureCount}/${threshold} failures)`,
       {
         code: 'PULSOR_CIRCUIT_BREAKER_OPEN',
-        cause: options.cause,
+        ...(options.cause !== undefined && { cause: options.cause }),
         context: {
           ...options.context,
           pulserAlias,
@@ -312,16 +328,18 @@ export class PulsorConcurrencyError extends PulsorError {
   ) {
     super(`Concurrent execution prevented for '${pulserAlias}'`, {
       code: 'PULSOR_CONCURRENCY_PREVENTED',
-      cause: options.cause,
+      ...(options.cause !== undefined && { cause: options.cause }),
       context: {
         ...options.context,
         pulserAlias,
-        executionId: options.executionId
+        ...(options.executionId !== undefined && { executionId: options.executionId })
       }
     });
     
     this.pulserAlias = pulserAlias;
-    this.executionId = options.executionId;
+    if (options.executionId !== undefined) {
+      this.executionId = options.executionId;
+    }
   }
 }
 
@@ -414,8 +432,8 @@ export function extractErrorInfo(error: unknown): {
       name: error.name,
       message: error.message,
       code: error.code,
-      stack: error.stack,
-      context: error.context
+      ...(error.stack !== undefined && { stack: error.stack }),
+      ...(error.context !== undefined && { context: error.context })
     };
   }
   
@@ -423,7 +441,7 @@ export function extractErrorInfo(error: unknown): {
     return {
       name: error.name,
       message: error.message,
-      stack: error.stack
+      ...(error.stack !== undefined && { stack: error.stack })
     };
   }
   
@@ -445,7 +463,7 @@ export function normalizeError(error: unknown, context?: Record<string, unknown>
     return new PulsorError(error.message, {
       code: 'WRAPPED_ERROR',
       cause: error,
-      context
+      ...(context !== undefined && { context })
     });
   }
   

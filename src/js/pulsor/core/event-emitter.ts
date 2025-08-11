@@ -7,7 +7,6 @@
 
 import type { 
   EventDataMap, 
-  EventListener, 
   BaseEventData 
 } from '../types/index.js';
 import type { IEventEmitter } from '../interfaces/index.js';
@@ -38,9 +37,9 @@ interface ListenerEntry<TData = unknown> {
 interface EmissionResult {
   readonly eventType: string;
   readonly listenersCount: number;
-  readonly successfulCalls: number;
-  readonly failedCalls: number;
-  readonly totalDuration: number;
+  successfulCalls: number;
+  failedCalls: number;
+  totalDuration: number;
   readonly errors: Error[];
 }
 
@@ -98,20 +97,8 @@ const DEFAULT_CONFIG: EventEmitterConfig = {
 const DEFAULT_PRIORITY = 0;
 
 /**
- * High priority value
- */
-const HIGH_PRIORITY = 10;
-
-/**
- * Low priority value
- */
-const LOW_PRIORITY = -10;
-
-/**
  * Wildcard characters
  */
-const WILDCARD_SINGLE = '?';
-const WILDCARD_MULTI = '*';
 const NAMESPACE_SEPARATOR = ':';
 
 // ============================================================================
@@ -122,7 +109,7 @@ const NAMESPACE_SEPARATOR = ':';
  * Advanced Event Emitter implementation
  */
 export class EventEmitter<TEventMap extends EventDataMap = EventDataMap> 
-  implements IEventEmitter<TEventMap> {
+  implements IEventEmitter {
   
   private readonly config: EventEmitterConfig;
   private readonly listeners = new Map<string, ListenerEntry[]>();
@@ -139,16 +126,6 @@ export class EventEmitter<TEventMap extends EventDataMap = EventDataMap>
 
   /**
    * Add an event listener
-   */
-  public on<K extends keyof TEventMap>(
-    eventType: K,
-    listener: (data: TEventMap[K]) => void | Promise<void>
-  ): void {
-    this.addListenerInternal(eventType, listener, false, {});
-  }
-
-  /**
-   * Add an event listener with options
    */
   public on<K extends keyof TEventMap>(
     eventType: K,
@@ -272,9 +249,7 @@ export class EventEmitter<TEventMap extends EventDataMap = EventDataMap>
     this.totalEmissions++;
     
     try {
-      const result = this.config.enableAsyncEmission
-        ? this.emitAsyncInternal(eventKey, data)
-        : this.emitSync(eventKey, data);
+      const result = this.emitSync(eventKey, data);
       
       const duration = nowMs() - startTime;
       this.recordEmission(eventKey, duration, result);
@@ -316,7 +291,7 @@ export class EventEmitter<TEventMap extends EventDataMap = EventDataMap>
   /**
    * Get all listeners for an event
    */
-  public listeners<K extends keyof TEventMap>(
+  public getListeners<K extends keyof TEventMap>(
     eventType: K
   ): ((data: TEventMap[K]) => void | Promise<void>)[] {
     const eventKey = String(eventType);
@@ -476,7 +451,7 @@ export class EventEmitter<TEventMap extends EventDataMap = EventDataMap>
   /**
    * Create a namespaced event emitter
    */
-  public namespace(namespace: string): EventEmitter<TEventMap> {
+  public createNamespace(namespace: string): EventEmitter<TEventMap> {
     if (!this.config.enableNamespaces) {
       throw new PulsorError('Namespaces are disabled');
     }
@@ -580,9 +555,9 @@ export class EventEmitter<TEventMap extends EventDataMap = EventDataMap>
     // Insert in priority order
     const insertIndex = eventListeners.findIndex(existing => existing.priority < priority);
     if (insertIndex === -1) {
-      eventListeners.push(entry);
+      eventListeners.push(entry as ListenerEntry<unknown>);
     } else {
-      eventListeners.splice(insertIndex, 0, entry);
+      eventListeners.splice(insertIndex, 0, entry as ListenerEntry<unknown>);
     }
 
     return this;
@@ -619,9 +594,9 @@ export class EventEmitter<TEventMap extends EventDataMap = EventDataMap>
     // Insert in priority order
     const insertIndex = patternListeners.findIndex(existing => existing.priority < priority);
     if (insertIndex === -1) {
-      patternListeners.push(entry);
+      patternListeners.push(entry as ListenerEntry<unknown>);
     } else {
-      patternListeners.splice(insertIndex, 0, entry);
+      patternListeners.splice(insertIndex, 0, entry as ListenerEntry<unknown>);
     }
 
     return this;
@@ -648,20 +623,20 @@ export class EventEmitter<TEventMap extends EventDataMap = EventDataMap>
         entry.listener(data);
         entry.callCount++;
         entry.lastCalledAt = nowMs();
-        result.successfulCalls++;
+        (result as any).successfulCalls++;
         
         // Remove one-time listeners
         if (entry.once) {
           this.removeListenerEntry(eventKey, entry);
         }
       } catch (error) {
-        result.failedCalls++;
+        (result as any).failedCalls++;
         result.errors.push(error as Error);
         this.handleError(error as Error, eventKey);
       }
     }
 
-    result.totalDuration = nowMs() - startTime;
+    (result as any).totalDuration = nowMs() - startTime;
     return result;
   }
 
@@ -686,21 +661,21 @@ export class EventEmitter<TEventMap extends EventDataMap = EventDataMap>
         await entry.listener(data);
         entry.callCount++;
         entry.lastCalledAt = nowMs();
-        result.successfulCalls++;
+        (result as any).successfulCalls++;
         
         // Remove one-time listeners
         if (entry.once) {
           this.removeListenerEntry(eventKey, entry);
         }
       } catch (error) {
-        result.failedCalls++;
+        (result as any).failedCalls++;
         result.errors.push(error as Error);
         this.handleError(error as Error, eventKey);
       }
     });
 
     await Promise.allSettled(promises);
-    result.totalDuration = nowMs() - startTime;
+    (result as any).totalDuration = nowMs() - startTime;
     return result;
   }
 
@@ -820,7 +795,7 @@ export class EventEmitter<TEventMap extends EventDataMap = EventDataMap>
 
     // Clean old history
     const cutoff = now - this.config.statsRetentionTime;
-    while (this.emissionHistory.length > 0 && this.emissionHistory[0].timestamp < cutoff) {
+    while (this.emissionHistory.length > 0 && this.emissionHistory[0] && this.emissionHistory[0].timestamp < cutoff) {
       this.emissionHistory.shift();
     }
   }
@@ -870,58 +845,63 @@ class NamespacedEventEmitter<TEventMap extends EventDataMap = EventDataMap>
   
   constructor(
     private readonly parent: EventEmitter<TEventMap>,
-    protected readonly namespace: string
+    private readonly namespaceName: string
   ) {
     super();
   }
 
-  public emit<K extends keyof TEventMap>(
+  public override emit<K extends keyof TEventMap>(
     eventType: K,
     data: TEventMap[K]
   ): void {
-    const namespacedEvent = `${this.namespace}${NAMESPACE_SEPARATOR}${String(eventType)}` as K;
+    const namespacedEvent = `${this.namespaceName}${NAMESPACE_SEPARATOR}${String(eventType)}` as K;
     this.parent.emit(namespacedEvent, data);
   }
 
-  public on<K extends keyof TEventMap>(
+  public override on<K extends keyof TEventMap>(
     eventType: K,
-    listener: (data: TEventMap[K]) => void | Promise<void>
-  ): void {
-    const namespacedEvent = `${this.namespace}${NAMESPACE_SEPARATOR}${String(eventType)}` as K;
-    this.parent.on(namespacedEvent, listener);
+    listener: (data: TEventMap[K]) => void | Promise<void>,
+    options: {
+      priority?: number;
+      once?: boolean;
+    } = {}
+  ): this {
+    const namespacedEvent = `${this.namespaceName}${NAMESPACE_SEPARATOR}${String(eventType)}` as K;
+    this.parent.on(namespacedEvent, listener, options);
+    return this;
   }
 
-  public once<K extends keyof TEventMap>(
+  public override once<K extends keyof TEventMap>(
     eventType: K,
     listener: (data: TEventMap[K]) => void | Promise<void>,
     options: {
       priority?: number;
     } = {}
   ): this {
-    const namespacedEvent = `${this.namespace}${NAMESPACE_SEPARATOR}${String(eventType)}` as K;
+    const namespacedEvent = `${this.namespaceName}${NAMESPACE_SEPARATOR}${String(eventType)}` as K;
     this.parent.once(namespacedEvent, listener, options);
     return this;
   }
 
-  public off<K extends keyof TEventMap>(
+  public override off<K extends keyof TEventMap>(
     eventType: K,
-    listener: (data: TEventMap[K]) => void | Promise<void>
+    listener?: (data: TEventMap[K]) => void | Promise<void>
   ): void {
-    const namespacedEvent = `${this.namespace}${NAMESPACE_SEPARATOR}${String(eventType)}` as K;
+    const namespacedEvent = `${this.namespaceName}${NAMESPACE_SEPARATOR}${String(eventType)}` as K;
     this.parent.off(namespacedEvent, listener);
   }
 
-  public removeAllListeners<K extends keyof TEventMap>(eventType?: K): void {
+  public override removeAllListeners<K extends keyof TEventMap>(eventType?: K): void {
     if (eventType) {
-      const namespacedEvent = `${this.namespace}${NAMESPACE_SEPARATOR}${String(eventType)}` as K;
+      const namespacedEvent = `${this.namespaceName}${NAMESPACE_SEPARATOR}${String(eventType)}` as K;
       this.parent.removeAllListeners(namespacedEvent);
     } else {
       this.parent.removeAllListeners();
     }
   }
 
-  public listenerCount<K extends keyof TEventMap>(eventType: K): number {
-    const namespacedEvent = `${this.namespace}${NAMESPACE_SEPARATOR}${String(eventType)}` as K;
+  public override listenerCount<K extends keyof TEventMap>(eventType: K): number {
+    const namespacedEvent = `${this.namespaceName}${NAMESPACE_SEPARATOR}${String(eventType)}` as K;
     return this.parent.listenerCount(namespacedEvent);
   }
 }
