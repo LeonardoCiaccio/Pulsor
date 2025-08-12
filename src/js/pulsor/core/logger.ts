@@ -35,6 +35,16 @@ interface LoggerConfig {
   readonly enableColors: boolean;
   readonly maxHistorySize: number;
   readonly enablePerformanceLogging: boolean;
+  readonly enableAsyncLogging: boolean;
+  readonly enableBatching: boolean;
+  readonly batchSize: number;
+  readonly flushInterval: number;
+  readonly enableStructuredLogging: boolean;
+  readonly logRotation: {
+    enabled: boolean;
+    maxSizeBytes: number;
+    maxFiles: number;
+  };
   readonly console?: Console;
 }
 
@@ -67,7 +77,17 @@ const DEFAULT_CONFIG: LoggerConfig = {
   enableTimestamps: true,
   enableColors: true,
   maxHistorySize: 1000,
-  enablePerformanceLogging: false
+  enablePerformanceLogging: false,
+  enableAsyncLogging: false,
+  enableBatching: false,
+  batchSize: 100,
+  flushInterval: 1000, // 1 second
+  enableStructuredLogging: false,
+  logRotation: {
+    enabled: false,
+    maxSizeBytes: 10 * 1024 * 1024, // 10MB
+    maxFiles: 5
+  }
 };
 
 /**
@@ -101,6 +121,21 @@ const LEVEL_COLORS: Record<LogLevel, string> = {
 /**
  * Log level priorities (higher number = higher priority)
  */
+const LEVEL_PRIORITIES: Record<LogLevel, number> = {
+  debug: 1,
+  log: 2,
+  info: 3,
+  warn: 4,
+  error: 5
+};
+
+/**
+ * Batch queue for async logging
+ */
+interface LogBatch {
+  entries: LogEntry[];
+  timestamp: number;
+}
 
 
 // ============================================================================
@@ -115,6 +150,11 @@ export class Logger implements ILogger {
   private readonly history: LogEntry[] = [];
   private readonly performanceMeasurements = new Map<string, PerformanceMeasurement>();
   private readonly console: Console;
+  private readonly logQueue: LogEntry[] = [];
+  private batchTimer?: NodeJS.Timeout;
+  private readonly logBuffer = new Map<LogLevel, LogEntry[]>();
+  private currentLogSize = 0;
+  private isDestroyed = false;
 
   constructor(
     prefix: string = DEFAULT_CONFIG.prefix,
@@ -123,11 +163,25 @@ export class Logger implements ILogger {
     this.config = {
       ...DEFAULT_CONFIG,
       ...config,
-      prefix
+      prefix,
+      logRotation: {
+        ...DEFAULT_CONFIG.logRotation,
+        ...config.logRotation
+      }
     };
     
     // Use global console or provided console
     this.console = (config as any).console ?? globalThis.console;
+    
+    // Initialize log buffers for each level
+    Object.keys(LEVEL_PRIORITIES).forEach(level => {
+      this.logBuffer.set(level as LogLevel, []);
+    });
+    
+    // Start batch timer if batching is enabled
+    if (this.config.enableBatching) {
+      this.startBatchTimer();
+    }
   }
 
   /**
@@ -354,7 +408,7 @@ export class Logger implements ILogger {
    * Log at the specified level
    */
   private logAtLevel(level: LogLevel, message: string, ...args: unknown[]): void {
-    if (!this.isLevelEnabled(level)) {
+    if (!this.isLevelEnabled(level) || this.isDestroyed) {
       return;
     }
 
@@ -362,12 +416,22 @@ export class Logger implements ILogger {
       timestamp: new Date().toISOString(),
       level,
       message,
-      args,
+      args: this.sanitizeArgs(args),
       prefix: this.config.prefix
     };
 
     this.addToHistory(entry);
-    this.outputToConsole(entry);
+    
+    if (this.config.enableAsyncLogging || this.config.enableBatching) {
+      this.queueLogEntry(entry);
+    } else {
+      this.outputToConsole(entry);
+    }
+    
+    // Check for log rotation if enabled
+    if (this.config.logRotation.enabled) {
+      this.checkLogRotation(entry);
+    }
   }
 
   /**
@@ -378,28 +442,41 @@ export class Logger implements ILogger {
   }
 
   /**
-   * Add entry to history with size management
+   * Add entry to history with size management and optimization
    */
   private addToHistory(entry: LogEntry): void {
     this.history.push(entry);
     
-    // Maintain history size limit
+    // Maintain history size limit with efficient cleanup
     if (this.history.length > this.config.maxHistorySize) {
-      this.history.splice(0, this.history.length - this.config.maxHistorySize);
+      const removeCount = Math.floor(this.config.maxHistorySize * 0.1); // Remove 10%
+      this.history.splice(0, removeCount);
     }
+    
+    // Update current log size for rotation
+    this.currentLogSize += this.estimateLogEntrySize(entry);
   }
 
   /**
-   * Output entry to console with formatting
+   * Output entry to console with formatting and error handling
    */
   private outputToConsole(entry: LogEntry): void {
-    const formattedMessage = this.formatEntryForConsole(entry);
-    const consoleMethod = this.getConsoleMethod(entry.level);
-    
-    if (entry.args.length > 0) {
-      consoleMethod(formattedMessage, ...entry.args);
-    } else {
-      consoleMethod(formattedMessage);
+    try {
+      const formattedMessage = this.formatEntryForConsole(entry);
+      const consoleMethod = this.getConsoleMethod(entry.level);
+      
+      if (entry.args.length > 0) {
+        consoleMethod(formattedMessage, ...entry.args);
+      } else {
+        consoleMethod(formattedMessage);
+      }
+    } catch (error) {
+      // Fallback to basic console.log if formatting fails
+      try {
+        this.console.log(`[Logger Error] ${entry.message}`, error);
+      } catch {
+        // Silent failure if even basic logging fails
+      }
     }
   }
 
@@ -465,6 +542,185 @@ export class Logger implements ILogger {
     
     return false;
   }
+  
+  /**
+   * Queue log entry for batch processing
+   */
+  private queueLogEntry(entry: LogEntry): void {
+    if (this.config.enableBatching) {
+      const levelBuffer = this.logBuffer.get(entry.level);
+      if (levelBuffer) {
+        levelBuffer.push(entry);
+        
+        // Flush if batch size reached
+        if (levelBuffer.length >= this.config.batchSize) {
+          this.flushBatch(entry.level);
+        }
+      }
+    } else {
+      this.logQueue.push(entry);
+      this.processQueueAsync();
+    }
+  }
+  
+  /**
+   * Process log queue asynchronously
+   */
+  private async processQueueAsync(): Promise<void> {
+    if (this.logQueue.length === 0) {
+      return;
+    }
+    
+    // Use setTimeout to avoid blocking the main thread
+    setTimeout(() => {
+      const batch = this.logQueue.splice(0, this.config.batchSize);
+      batch.forEach(entry => this.outputToConsole(entry));
+      
+      if (this.logQueue.length > 0) {
+        this.processQueueAsync();
+      }
+    }, 0);
+  }
+  
+  /**
+   * Start batch timer for periodic flushing
+   */
+  private startBatchTimer(): void {
+    if (this.batchTimer) {
+      clearInterval(this.batchTimer);
+    }
+    
+    this.batchTimer = setInterval(() => {
+      this.flushAllBatches();
+    }, this.config.flushInterval);
+  }
+  
+  /**
+   * Flush a specific level batch
+   */
+  private flushBatch(level: LogLevel): void {
+    const levelBuffer = this.logBuffer.get(level);
+    if (!levelBuffer || levelBuffer.length === 0) {
+      return;
+    }
+    
+    const batch = levelBuffer.splice(0);
+    batch.forEach(entry => this.outputToConsole(entry));
+  }
+  
+  /**
+   * Flush all batches
+   */
+  private flushAllBatches(): void {
+    for (const level of Object.keys(LEVEL_PRIORITIES) as LogLevel[]) {
+      this.flushBatch(level);
+    }
+  }
+  
+  /**
+   * Sanitize arguments to prevent logging of sensitive data
+   */
+  private sanitizeArgs(args: readonly unknown[]): readonly unknown[] {
+    return args.map(arg => {
+      if (arg && typeof arg === 'object') {
+        try {
+          // Create a sanitized copy
+          const sanitized = JSON.parse(JSON.stringify(arg, (key, value) => {
+            // Remove potentially sensitive keys
+            const sensitiveKeys = ['password', 'token', 'secret', 'key', 'auth', 'credential'];
+            if (sensitiveKeys.some(sensitive => key.toLowerCase().includes(sensitive))) {
+              return '[REDACTED]';
+            }
+            return value;
+          }));
+          return sanitized;
+        } catch {
+          return '[Object]';
+        }
+      }
+      return arg;
+    });
+  }
+  
+  /**
+   * Estimate log entry size in bytes
+   */
+  private estimateLogEntrySize(entry: LogEntry): number {
+    try {
+      return JSON.stringify(entry).length * 2; // UTF-16 estimate
+    } catch {
+      return entry.message.length * 2 + 100; // Basic estimate
+    }
+  }
+  
+  /**
+   * Check if log rotation is needed
+   */
+  private checkLogRotation(entry: LogEntry): void {
+    if (this.currentLogSize > this.config.logRotation.maxSizeBytes) {
+      this.rotateLog();
+    }
+  }
+  
+  /**
+   * Rotate log by clearing old entries
+   */
+  private rotateLog(): void {
+    const keepCount = Math.floor(this.config.maxHistorySize * 0.5); // Keep 50%
+    this.history.splice(0, this.history.length - keepCount);
+    this.currentLogSize = this.history.reduce((size, entry) => 
+      size + this.estimateLogEntrySize(entry), 0);
+    
+    this.info(`Log rotated, kept ${keepCount} entries`);
+  }
+  
+  /**
+   * Destroy logger and cleanup resources
+   */
+  public destroy(): void {
+    if (this.isDestroyed) {
+      return;
+    }
+    
+    this.isDestroyed = true;
+    
+    // Flush any remaining batches
+    this.flushAllBatches();
+    
+    // Clear batch timer
+    if (this.batchTimer) {
+      clearInterval(this.batchTimer);
+      this.batchTimer = undefined;
+    }
+    
+    // Clear all buffers and queues
+    this.logQueue.length = 0;
+    this.logBuffer.clear();
+    this.performanceMeasurements.clear();
+    this.history.length = 0;
+  }
+  
+  /**
+   * Get logger performance statistics
+   */
+  public getPerformanceStats(): {
+    totalEntries: number;
+    queueSize: number;
+    bufferSizes: Record<LogLevel, number>;
+    currentLogSize: number;
+  } {
+    const bufferSizes = {} as Record<LogLevel, number>;
+    for (const [level, buffer] of this.logBuffer) {
+      bufferSizes[level] = buffer.length;
+    }
+    
+    return {
+      totalEntries: this.history.length,
+      queueSize: this.logQueue.length,
+      bufferSizes,
+      currentLogSize: this.currentLogSize
+    };
+  }
 }
 
 // ============================================================================
@@ -491,6 +747,9 @@ export function createPerformanceLogger(
   return new Logger(prefix, {
     ...config,
     enablePerformanceLogging: true,
+    enableAsyncLogging: true,
+    enableBatching: true,
+    batchSize: 50,
     enabledLevels: {
       ...DEFAULT_CONFIG.enabledLevels,
       debug: true,
@@ -529,6 +788,8 @@ export function createTestLogger(
       error: true
     },
     maxHistorySize: 10000,
+    enableAsyncLogging: false,
+    enableBatching: false,
     console: {
       log: () => {},
       debug: () => {},
@@ -536,6 +797,44 @@ export function createTestLogger(
       warn: () => {},
       error: () => {}
     } as Console
+  });
+}
+
+/**
+ * Create a high-performance logger with optimized settings
+ */
+export function createHighPerformanceLogger(
+  prefix: string = '[Pulsor:HiPerf]',
+  config: Partial<LoggerConfig> = {}
+): Logger {
+  return new Logger(prefix, {
+    ...config,
+    enableAsyncLogging: true,
+    enableBatching: true,
+    batchSize: 200,
+    flushInterval: 500,
+    enableTimestamps: false,
+    enableColors: false,
+    maxHistorySize: 500,
+    enablePerformanceLogging: false
+  });
+}
+
+/**
+ * Create a structured logger for machine-readable logs
+ */
+export function createStructuredLogger(
+  prefix: string = '[Pulsor:Structured]',
+  config: Partial<LoggerConfig> = {}
+): Logger {
+  return new Logger(prefix, {
+    ...config,
+    enableStructuredLogging: true,
+    enableTimestamps: true,
+    enableColors: false,
+    enableAsyncLogging: true,
+    enableBatching: true,
+    batchSize: 100
   });
 }
 

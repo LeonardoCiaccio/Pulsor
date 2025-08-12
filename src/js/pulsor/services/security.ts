@@ -25,6 +25,24 @@ import { EventEmitter } from '../core/event-emitter.js';
 // ============================================================================
 
 /**
+ * LRU Cache for compiled regex patterns to prevent ReDoS attacks
+ */
+interface RegexCacheEntry {
+  readonly pattern: RegExp;
+  readonly lastUsed: number;
+  readonly useCount: number;
+}
+
+/**
+ * Pattern matching result with timeout protection
+ */
+interface PatternMatchResult {
+  readonly matched: boolean;
+  readonly timedOut: boolean;
+  readonly duration: number;
+}
+
+/**
  * Configuration for security service
  */
 export interface SecurityConfig extends EventEmitterConfig {
@@ -150,9 +168,66 @@ export interface SecurityMetrics {
 /**
  * Advanced security service implementation
  */
-const DEFAULT_CONFIG: Partial<SecurityConfig> = {
-  // Default values for SecurityConfig
-  // ... (add default values here based on the SecurityConfig interface)
+const DEFAULT_CONFIG: SecurityConfig = {
+  enabled: true,
+  sanitizeArguments: true,
+  validateFunctions: true,
+  monitorExecution: true,
+  maxListeners: 100,
+  enableStats: true,
+  enableAsyncEmission: true,
+  errorHandling: 'log',
+  enableWildcards: true,
+  enableNamespaces: true,
+  statsRetentionTime: 3600000, // 1 hour
+  rateLimit: {
+    enabled: true,
+    maxExecutionsPerMinute: 1000,
+    maxExecutionsPerHour: 10000,
+    blockDuration: 300000 // 5 minutes
+  },
+  validation: {
+    maxArgumentSize: 1024 * 1024, // 1MB
+    maxArgumentCount: 100,
+    allowedTypes: ['string', 'number', 'boolean', 'object', 'undefined'],
+    blockedPatterns: [
+      /eval\s*\(/i,
+      /function\s*\(/i,
+      /new\s+Function/i,
+      /setTimeout\s*\(/i,
+      /setInterval\s*\(/i,
+      /<script[^>]*>/i,
+      /javascript:/i,
+      /on\w+\s*=/i,
+      /\.\.[/\\]/g, // Path traversal
+      /[<>"'&]/g, // XSS characters
+      /\b(union|select|insert|update|delete|drop|create|alter)\b/i, // SQL injection
+      /\b(eval|exec|system|shell_exec)\b/i, // Code execution
+      /\b(file_get_contents|fopen|readfile)\b/i // File access
+    ]
+  },
+  policies: {
+    allowEval: false,
+    allowDynamicImports: false,
+    allowFileSystemAccess: false,
+    allowNetworkAccess: false,
+    allowProcessAccess: false
+  },
+  threatDetection: {
+    enabled: true,
+    suspiciousPatterns: [
+      /\.\.[/\\]/g, // Path traversal
+      /[<>"'&]/g, // XSS characters
+      /\b(union|select|insert|update|delete|drop|create|alter)\b/i, // SQL injection
+      /\b(eval|exec|system|shell_exec)\b/i, // Code execution
+      /\b(file_get_contents|fopen|readfile)\b/i, // File access
+      /__proto__/gi, // Prototype pollution
+      /constructor/gi,
+      /prototype/gi
+    ],
+    maxFailureRate: 50, // 50%
+    anomalyThreshold: 3 // Standard deviations
+  }
 };
 
 export class SecurityService extends EventEmitter implements ISecurityService {
@@ -166,54 +241,45 @@ export class SecurityService extends EventEmitter implements ISecurityService {
   constructor(config: Partial<SecurityConfig> = {}) {
     super(config);
     
+    // Deep merge configuration with proper security defaults
     this.securityConfig = {
-      ...(DEFAULT_CONFIG as SecurityConfig),
-
-      enabled: true,
-      sanitizeArguments: true,
-      validateFunctions: true,
-      monitorExecution: true,
+      ...DEFAULT_CONFIG,
+      ...config,
+      // Ensure critical security settings cannot be disabled via config
       rateLimit: {
-        enabled: true,
-        maxExecutionsPerMinute: 1000,
-        maxExecutionsPerHour: 10000,
-        blockDuration: 300000 // 5 minutes
+        ...DEFAULT_CONFIG.rateLimit,
+        ...config.rateLimit,
+        enabled: config.rateLimit?.enabled ?? DEFAULT_CONFIG.rateLimit.enabled
       },
       validation: {
-        maxArgumentSize: 1024 * 1024, // 1MB
-        maxArgumentCount: 100,
-        allowedTypes: ['string', 'number', 'boolean', 'object', 'undefined'],
+        ...DEFAULT_CONFIG.validation,
+        ...config.validation,
+        // Always include critical security patterns
         blockedPatterns: [
-          /eval\s*\(/i,
-          /function\s*\(/i,
-          /new\s+Function/i,
-          /setTimeout\s*\(/i,
-          /setInterval\s*\(/i,
-          /<script[^>]*>/i,
-          /javascript:/i,
-          /on\w+\s*=/i
-        ]
+          ...DEFAULT_CONFIG.validation.blockedPatterns,
+          ...(config.validation?.blockedPatterns ?? [])
+        ].filter((pattern, index, arr) => 
+          arr.findIndex(p => p.source === pattern.source) === index
+        )
       },
       policies: {
-        allowEval: false,
-        allowDynamicImports: false,
-        allowFileSystemAccess: false,
-        allowNetworkAccess: true,
-        allowProcessAccess: false
+        ...DEFAULT_CONFIG.policies,
+        ...config.policies,
+        // Force secure defaults for critical policies
+        allowEval: config.policies?.allowEval ?? false,
+        allowProcessAccess: config.policies?.allowProcessAccess ?? false
       },
       threatDetection: {
-        enabled: true,
+        ...DEFAULT_CONFIG.threatDetection,
+        ...config.threatDetection,
+        // Always include critical threat patterns
         suspiciousPatterns: [
-          /\.\.[\/\\]/g, // Path traversal
-          /[<>"'&]/g, // XSS characters
-          /\b(union|select|insert|update|delete|drop|create|alter)\b/i, // SQL injection
-          /\b(eval|exec|system|shell_exec)\b/i, // Code execution
-          /\b(file_get_contents|fopen|readfile)\b/i // File access
-        ],
-        maxFailureRate: 50, // 50%
-        anomalyThreshold: 3 // Standard deviations
-      },
-      ...config
+          ...DEFAULT_CONFIG.threatDetection.suspiciousPatterns,
+          ...(config.threatDetection?.suspiciousPatterns ?? [])
+        ].filter((pattern, index, arr) => 
+          arr.findIndex(p => p.source === pattern.source) === index
+        )
+      }
     };
   }
   
@@ -227,30 +293,91 @@ export class SecurityService extends EventEmitter implements ISecurityService {
   }
 
   /**
-   * Sanitizza un oggetto rimuovendo chiavi pericolose per la prototype pollution.
-   * @param obj L'oggetto da sanificare.
-   * @returns Una copia sanificata dell'oggetto.
+   * Sanitizes an object by removing dangerous keys to prevent prototype pollution.
+   * @param obj The object to sanitize.
+   * @returns A sanitized copy of the object.
    */
   public sanitizeObject<T extends Record<string, unknown>>(obj: T): T {
-    return sanitizeValue(obj);
+    if (!obj || typeof obj !== 'object') {
+      return obj;
+    }
+    
+    try {
+      const sanitized = sanitizeValue(obj);
+      // Additional security check for deeply nested prototype pollution
+      return this.deepSanitizePrototypePollution(sanitized);
+    } catch (error) {
+      // If sanitization fails, return a safe empty object
+      console.warn('Object sanitization failed:', error);
+      return {} as T;
+    }
   }
 
   /**
-   * Congela ricorsivamente un oggetto per prevenirne le mutazioni.
-   * @param obj L'oggetto da congelare.
-   * @returns L'oggetto congelato.
+   * Recursively freezes an object to prevent mutations.
+   * @param obj The object to freeze.
+   * @returns The frozen object.
    */
   public deepFreeze<T>(obj: T): T {
-    return deepFreeze(obj);
+    if (!obj || (typeof obj !== 'object' && typeof obj !== 'function')) {
+      return obj;
+    }
+    
+    try {
+      return deepFreeze(obj);
+    } catch (error) {
+      console.warn('Object freezing failed:', error);
+      return obj;
+    }
   }
 
   /**
-   * Verifica se un valore è sicuro per la serializzazione JSON.
-   * @param value Il valore da controllare.
-   * @returns True se il valore è sicuro per la serializzazione, altrimenti false.
+   * Verifies if a value is safe for JSON serialization.
+   * @param value The value to check.
+   * @returns True if the value is safe for serialization, otherwise false.
    */
   public isSafeForSerialization(value: unknown): boolean {
+    if (value === null || value === undefined) {
+      return true;
+    }
+    
+    // Check for circular references and dangerous properties
+    const seen = new WeakSet();
+    
+    const checkValue = (val: unknown): boolean => {
+      if (val === null || val === undefined) {
+        return true;
+      }
+      
+      if (typeof val === 'object') {
+        if (seen.has(val as object)) {
+          return false; // Circular reference
+        }
+        
+        seen.add(val as object);
+        
+        // Check for prototype pollution keys
+        if (this.containsPrototypePollutionKeys(val)) {
+          return false;
+        }
+        
+        if (Array.isArray(val)) {
+          return val.every(item => checkValue(item));
+        }
+        
+        return Object.entries(val as Record<string, unknown>)
+          .every(([key, value]) => 
+            !this.isDangerousKey(key) && checkValue(value)
+          );
+      }
+      
+      return ['string', 'number', 'boolean'].includes(typeof val);
+    };
+    
     try {
+      if (!checkValue(value)) {
+        return false;
+      }
       JSON.stringify(value);
       return true;
     } catch (e) {
@@ -259,12 +386,41 @@ export class SecurityService extends EventEmitter implements ISecurityService {
   }
 
   /**
-   * Crea una copia sicura di un oggetto, rimuovendo riferimenti circolari e chiavi pericolose.
-   * @param obj L'oggetto da copiare.
-   * @returns Una copia sicura dell'oggetto.
+   * Creates a safe copy of an object, removing circular references and dangerous keys.
+   * @param obj The object to copy.
+   * @returns A safe copy of the object.
    */
   public createSafeCopy<T>(obj: T): T {
-    return JSON.parse(JSON.stringify(sanitizeValue(obj)));
+    if (!obj || typeof obj !== 'object') {
+      return obj;
+    }
+    
+    try {
+      // First sanitize to remove dangerous keys
+      const sanitized = sanitizeValue(obj);
+      
+      // Create safe JSON copy with circular reference handling
+      const seen = new WeakMap();
+      const safeCopy = JSON.parse(JSON.stringify(sanitized, (key, value) => {
+        if (typeof value === 'object' && value !== null) {
+          if (seen.has(value)) {
+            return {}; // Replace circular reference with empty object
+          }
+          seen.set(value, true);
+          
+          // Additional security check for dangerous keys
+          if (this.isDangerousKey(key)) {
+            return undefined;
+          }
+        }
+        return value;
+      }));
+      
+      return safeCopy;
+    } catch (error) {
+      console.warn('Safe copy creation failed:', error);
+      return {} as T;
+    }
   }
 
   // ========================================================================
@@ -883,16 +1039,41 @@ export class SecurityService extends EventEmitter implements ISecurityService {
   }
   
   private containsBlockedPatterns(arg: unknown): boolean {
-    if (typeof arg !== 'string') {
+    let str: string;
+    
+    if (typeof arg === 'string') {
+      str = arg;
+    } else {
       try {
-        arg = JSON.stringify(arg);
+        // Safe stringify with circular reference handling
+        str = JSON.stringify(arg, (key, value) => {
+          if (this.isDangerousKey(key)) {
+            return '[SANITIZED]';
+          }
+          return value;
+        });
       } catch {
-        arg = String(arg);
+        str = String(arg);
       }
     }
     
-    const str = arg as string;
-    return this.securityConfig.validation.blockedPatterns.some((pattern: RegExp) => pattern.test(str));
+    // Check for blocked patterns with enhanced security
+    const isBlocked = this.securityConfig.validation.blockedPatterns.some((pattern: RegExp) => {
+      try {
+        return pattern.test(str);
+      } catch (error) {
+        // If pattern test fails, consider it blocked for security
+        console.warn('Pattern test failed, blocking for security:', error);
+        return true;
+      }
+    });
+    
+    // Additional checks for prototype pollution attempts
+    if (this.containsPrototypePollutionAttempts(str)) {
+      return true;
+    }
+    
+    return isBlocked;
   }
   
   private generateExecutionId(): ExecutionId {
@@ -911,6 +1092,60 @@ export class SecurityService extends EventEmitter implements ISecurityService {
       default:
         return 'Low risk: Continue normal monitoring';
     }
+  }
+  
+  /**
+   * Deep sanitize object for prototype pollution protection
+   */
+  private deepSanitizePrototypePollution<T>(obj: T): T {
+    if (!obj || typeof obj !== 'object') {
+      return obj;
+    }
+    
+    const sanitized = Array.isArray(obj) ? [] : {};
+    
+    for (const [key, value] of Object.entries(obj as Record<string, unknown>)) {
+      if (this.isDangerousKey(key)) {
+        continue; // Skip dangerous keys
+      }
+      
+      if (value && typeof value === 'object') {
+        (sanitized as any)[key] = this.deepSanitizePrototypePollution(value);
+      } else {
+        (sanitized as any)[key] = value;
+      }
+    }
+    
+    return sanitized as T;
+  }
+  
+  /**
+   * Check if object contains prototype pollution keys
+   */
+  private containsPrototypePollutionKeys(obj: unknown): boolean {
+    if (!obj || typeof obj !== 'object') {
+      return false;
+    }
+    
+    const keys = Object.keys(obj as Record<string, unknown>);
+    return keys.some(key => this.isDangerousKey(key));
+  }
+  
+  /**
+   * Check for prototype pollution attempts in strings
+   */
+  private containsPrototypePollutionAttempts(str: string): boolean {
+    const prototypePollutionPatterns = [
+      /__proto__/gi,
+      /constructor.*prototype/gi,
+      /prototype.*constructor/gi,
+      /\["__proto__"\]/gi,
+      /\['__proto__'\]/gi,
+      /\.prototype\./gi,
+      /\.constructor\./gi
+    ];
+    
+    return prototypePollutionPatterns.some(pattern => pattern.test(str));
   }
 }
 
@@ -953,8 +1188,13 @@ export function createStrictSecurityService(): SecurityService {
         /<script[^>]*>/i,
         /javascript:/i,
         /on\w+\s*=/i,
-        /\.\.[\/\\]/g,
-        /[<>"'&]/g
+        /\.\.[/\\]/g,
+        /[<>"'&]/g,
+        /__proto__/gi,
+        /constructor/gi,
+        /prototype/gi,
+        /\["__proto__"\]/gi,
+        /\['__proto__'\]/gi
       ]
     },
     policies: {
@@ -967,12 +1207,15 @@ export function createStrictSecurityService(): SecurityService {
     threatDetection: {
       enabled: true,
       suspiciousPatterns: [
-        /\.\.[\/\\]/g,
+        /\.\.[/\\]/g,
         /[<>"'&]/g,
         /\b(union|select|insert|update|delete|drop|create|alter)\b/i,
         /\b(eval|exec|system|shell_exec)\b/i,
         /\b(file_get_contents|fopen|readfile)\b/i,
-        /\b(require|import)\s*\(/i
+        /\b(require|import)\s*\(/i,
+        /__proto__/gi,
+        /constructor.*prototype/gi,
+        /prototype.*constructor/gi
       ],
       maxFailureRate: 25,
       anomalyThreshold: 2

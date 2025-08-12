@@ -119,6 +119,8 @@ export class EventEmitter<TEventMap extends EventDataMap = EventDataMap>
   private isDestroyed = false;
   private totalEmissions = 0;
   private totalErrors = 0;
+  private readonly pendingEmissions = new Map<string, Promise<void>>();
+  private readonly listenerPool = new Map<string, ListenerEntry[]>();
 
   constructor(config: Partial<EventEmitterConfig> = {}) {
     this.config = { ...DEFAULT_CONFIG, ...config };
@@ -135,6 +137,9 @@ export class EventEmitter<TEventMap extends EventDataMap = EventDataMap>
       once?: boolean;
     } = {}
   ): this {
+    if (this.isDestroyed) {
+      throw new PulsorError('EventEmitter has been destroyed');
+    }
     return this.addListenerInternal(eventType, listener, false, options);
   }
 
@@ -229,13 +234,18 @@ export class EventEmitter<TEventMap extends EventDataMap = EventDataMap>
     eventType: K,
     data: TEventMap[K]
   ): void {
-    this.emitEvent(eventType, data);
+    if (this.isDestroyed) {
+      return;
+    }
+    
+    // Use optimized synchronous emission for performance
+    this.emitEventOptimized(eventType, data);
   }
 
   /**
-   * Emit an event (internal method)
+   * Emit an event with optimized performance
    */
-  private emitEvent<K extends keyof TEventMap>(
+  private emitEventOptimized<K extends keyof TEventMap>(
     eventType: K,
     data: TEventMap[K]
   ): boolean {
@@ -243,16 +253,26 @@ export class EventEmitter<TEventMap extends EventDataMap = EventDataMap>
       return false;
     }
 
-    const startTime = nowMs();
     const eventKey = String(eventType);
+    const startTime = this.config.enableStats ? nowMs() : 0;
     
     this.totalEmissions++;
     
     try {
-      const result = this.emitSync(eventKey, data);
+      // Fast path for events with no listeners
+      const directListeners = this.listeners.get(eventKey);
+      const hasWildcards = this.config.enableWildcards && this.wildcardListeners.size > 0;
       
-      const duration = nowMs() - startTime;
-      this.recordEmission(eventKey, duration, result);
+      if (!directListeners && !hasWildcards) {
+        return false;
+      }
+      
+      const result = this.emitSyncOptimized(eventKey, data);
+      
+      if (this.config.enableStats) {
+        const duration = nowMs() - startTime;
+        this.recordEmission(eventKey, duration, result);
+      }
       
       return result.listenersCount > 0;
     } catch (error) {
@@ -496,8 +516,35 @@ export class EventEmitter<TEventMap extends EventDataMap = EventDataMap>
     }
 
     this.isDestroyed = true;
+    
+    // Wait for any pending emissions to complete
+    const pendingPromises = Array.from(this.pendingEmissions.values());
+    if (pendingPromises.length > 0) {
+      Promise.allSettled(pendingPromises).then(() => {
+        this.performCleanup();
+      }).catch(() => {
+        this.performCleanup();
+      });
+    } else {
+      this.performCleanup();
+    }
+  }
+  
+  /**
+   * Perform cleanup operations
+   */
+  private performCleanup(): void {
     this.removeAllListeners();
     this.clearStats();
+    
+    // Clear all internal maps and arrays
+    this.pendingEmissions.clear();
+    this.listenerPool.clear();
+    this.emissionHistory.length = 0;
+    
+    // Reset counters
+    this.totalEmissions = 0;
+    this.totalErrors = 0;
   }
 
   /**
@@ -603,31 +650,41 @@ export class EventEmitter<TEventMap extends EventDataMap = EventDataMap>
   }
 
   /**
-   * Emit event synchronously
+   * Optimized synchronous event emission
    */
-  private emitSync(eventKey: string, data: any): EmissionResult {
-    const allListeners = this.getAllListeners(eventKey);
+  private emitSyncOptimized(eventKey: string, data: any): EmissionResult {
+    const directListeners = this.listeners.get(eventKey) || [];
+    const wildcardListeners = this.config.enableWildcards ? this.getWildcardListeners(eventKey) : [];
+    
+    const totalListeners = directListeners.length + wildcardListeners.length;
+    
+    if (totalListeners === 0) {
+      return this.createEmptyResult(eventKey);
+    }
+    
     const result: EmissionResult = {
       eventType: eventKey,
-      listenersCount: allListeners.length,
+      listenersCount: totalListeners,
       successfulCalls: 0,
       failedCalls: 0,
       totalDuration: 0,
       errors: []
     };
 
-    const startTime = nowMs();
+    const startTime = this.config.enableStats ? nowMs() : 0;
+    const onceListeners: ListenerEntry[] = [];
     
-    for (const entry of allListeners) {
+    // Process direct listeners first (more common case)
+    for (let i = 0; i < directListeners.length; i++) {
+      const entry = directListeners[i];
       try {
         entry.listener(data);
         entry.callCount++;
-        entry.lastCalledAt = nowMs();
+        entry.lastCalledAt = startTime || nowMs();
         (result as any).successfulCalls++;
         
-        // Remove one-time listeners
         if (entry.once) {
-          this.removeListenerEntry(eventKey, entry);
+          onceListeners.push(entry);
         }
       } catch (error) {
         (result as any).failedCalls++;
@@ -635,8 +692,35 @@ export class EventEmitter<TEventMap extends EventDataMap = EventDataMap>
         this.handleError(error as Error, eventKey);
       }
     }
+    
+    // Process wildcard listeners
+    for (let i = 0; i < wildcardListeners.length; i++) {
+      const entry = wildcardListeners[i];
+      try {
+        entry.listener(data);
+        entry.callCount++;
+        entry.lastCalledAt = startTime || nowMs();
+        (result as any).successfulCalls++;
+        
+        if (entry.once) {
+          onceListeners.push(entry);
+        }
+      } catch (error) {
+        (result as any).failedCalls++;
+        result.errors.push(error as Error);
+        this.handleError(error as Error, eventKey);
+      }
+    }
+    
+    // Remove one-time listeners in batch
+    if (onceListeners.length > 0) {
+      this.batchRemoveListeners(eventKey, onceListeners);
+    }
 
-    (result as any).totalDuration = nowMs() - startTime;
+    if (this.config.enableStats) {
+      (result as any).totalDuration = nowMs() - startTime;
+    }
+    
     return result;
   }
 
@@ -710,18 +794,44 @@ export class EventEmitter<TEventMap extends EventDataMap = EventDataMap>
   }
 
   /**
-   * Check if event matches wildcard pattern
+   * Check if event matches wildcard pattern (optimized)
    */
   private matchesWildcard(eventKey: string, pattern: WildcardPattern): boolean {
-    // Convert wildcard pattern to regex
-    const regexPattern = pattern
-      .replace(/[.*+?^${}()|[\]\\]/g, '\\$&') // Escape special regex chars
-      .replace(/\\\*/g, '.*') // Replace * with .*
-      .replace(/\\\?/g, '.'); // Replace ? with .
+    // Cache compiled regex patterns for performance
+    if (!this.compiledPatterns) {
+      this.compiledPatterns = new Map<string, RegExp>();
+    }
     
-    const regex = new RegExp(`^${regexPattern}$`);
-    return regex.test(eventKey);
+    let regex = this.compiledPatterns.get(pattern);
+    if (!regex) {
+      try {
+        // Convert wildcard pattern to regex
+        const regexPattern = pattern
+          .replace(/[.*+?^${}()|[\]\\]/g, '\\$&') // Escape special regex chars
+          .replace(/\\\*/g, '.*') // Replace * with .*
+          .replace(/\\\?/g, '.'); // Replace ? with .
+        
+        regex = new RegExp(`^${regexPattern}$`);
+        
+        // Cache the compiled regex (limit cache size)
+        if (this.compiledPatterns.size < 100) {
+          this.compiledPatterns.set(pattern, regex);
+        }
+      } catch (error) {
+        // Invalid regex pattern, no match
+        return false;
+      }
+    }
+    
+    try {
+      return regex.test(eventKey);
+    } catch (error) {
+      // Regex test failed, no match
+      return false;
+    }
   }
+  
+  private compiledPatterns?: Map<string, RegExp>;
 
   /**
    * Remove a specific listener entry
@@ -752,9 +862,41 @@ export class EventEmitter<TEventMap extends EventDataMap = EventDataMap>
       }
     }
   }
+  
+  /**
+   * Batch remove multiple listener entries for performance
+   */
+  private batchRemoveListeners(eventKey: string, entries: ListenerEntry[]): void {
+    if (entries.length === 0) {
+      return;
+    }
+    
+    const entryIds = new Set(entries.map(e => e.id));
+    
+    // Remove from direct listeners
+    const directListeners = this.listeners.get(eventKey);
+    if (directListeners) {
+      const filteredListeners = directListeners.filter(e => !entryIds.has(e.id));
+      if (filteredListeners.length === 0) {
+        this.listeners.delete(eventKey);
+      } else if (filteredListeners.length < directListeners.length) {
+        this.listeners.set(eventKey, filteredListeners);
+      }
+    }
+    
+    // Remove from wildcard listeners
+    for (const [pattern, listeners] of this.wildcardListeners) {
+      const filteredListeners = listeners.filter(e => !entryIds.has(e.id));
+      if (filteredListeners.length === 0) {
+        this.wildcardListeners.delete(pattern);
+      } else if (filteredListeners.length < listeners.length) {
+        this.wildcardListeners.set(pattern, filteredListeners);
+      }
+    }
+  }
 
   /**
-   * Record emission statistics
+   * Record emission statistics (optimized)
    */
   private recordEmission(eventKey: string, duration: number, result: EmissionResult): void {
     if (!this.config.enableStats) {
@@ -763,7 +905,7 @@ export class EventEmitter<TEventMap extends EventDataMap = EventDataMap>
 
     const now = nowMs();
     
-    // Update event-specific stats
+    // Update event-specific stats with optimized calculations
     let eventStats = this.stats.get(eventKey);
     if (!eventStats) {
       eventStats = {
@@ -778,25 +920,51 @@ export class EventEmitter<TEventMap extends EventDataMap = EventDataMap>
       this.stats.set(eventKey, eventStats);
     }
 
-    // Update stats
-    (eventStats as any).totalEmissions++;
-    (eventStats as any).totalListeners += result.listenersCount;
-    (eventStats as any).averageListeners = eventStats.totalListeners / eventStats.totalEmissions;
-    (eventStats as any).averageDuration = (eventStats.averageDuration * (eventStats.totalEmissions - 1) + duration) / eventStats.totalEmissions;
-    (eventStats as any).lastEmittedAt = now;
-    (eventStats as any).errors += result.failedCalls;
+    // Batch update stats for better performance
+    const mutableStats = eventStats as any;
+    const prevEmissions = mutableStats.totalEmissions;
+    
+    mutableStats.totalEmissions++;
+    mutableStats.totalListeners += result.listenersCount;
+    mutableStats.averageListeners = mutableStats.totalListeners / mutableStats.totalEmissions;
+    mutableStats.averageDuration = (mutableStats.averageDuration * prevEmissions + duration) / mutableStats.totalEmissions;
+    mutableStats.lastEmittedAt = now;
+    mutableStats.errors += result.failedCalls;
 
-    // Record in emission history
+    // Record in emission history with size limit
+    if (this.emissionHistory.length >= 1000) {
+      // Remove oldest entries in batch for better performance
+      this.emissionHistory.splice(0, 100);
+    }
+    
     this.emissionHistory.push({
       eventType: eventKey,
       timestamp: now,
       duration
     });
 
-    // Clean old history
-    const cutoff = now - this.config.statsRetentionTime;
-    while (this.emissionHistory.length > 0 && this.emissionHistory[0] && this.emissionHistory[0].timestamp < cutoff) {
-      this.emissionHistory.shift();
+    // Periodically clean old history (every 100 emissions)
+    if (this.totalEmissions % 100 === 0) {
+      this.cleanupOldHistory();
+    }
+  }
+  
+  /**
+   * Cleanup old emission history
+   */
+  private cleanupOldHistory(): void {
+    const cutoff = nowMs() - this.config.statsRetentionTime;
+    let removeCount = 0;
+    
+    for (let i = 0; i < this.emissionHistory.length; i++) {
+      if (this.emissionHistory[i] && this.emissionHistory[i].timestamp >= cutoff) {
+        break;
+      }
+      removeCount++;
+    }
+    
+    if (removeCount > 0) {
+      this.emissionHistory.splice(0, removeCount);
     }
   }
 

@@ -123,6 +123,8 @@ export class CircuitBreaker implements ICircuitBreaker {
   private healthCheckFunction?: HealthCheckFunction;
   private monitoringTimer?: NodeJS.Timeout | undefined;
   private isDestroyed = false;
+  private readonly stateLock = new Set<string>();
+  private lastStateChange = 0;
 
   constructor(
     private readonly name: string,
@@ -143,12 +145,20 @@ export class CircuitBreaker implements ICircuitBreaker {
       return false;
     }
 
-    switch (this.state) {
+    // Prevent race conditions during state transitions
+    const currentState = this.state;
+    
+    switch (currentState) {
       case 'CLOSED':
         return true;
       
       case 'OPEN':
-        return this.shouldAttemptReset();
+        const shouldReset = this.shouldAttemptReset();
+        if (shouldReset && !this.stateLock.has('transition')) {
+          // Attempt transition to HALF_OPEN
+          this.transitionTo('HALF_OPEN', 'Recovery timeout reached');
+        }
+        return shouldReset;
       
       case 'HALF_OPEN':
         return this.halfOpenCalls < this.config.halfOpenMaxCalls;
@@ -165,11 +175,35 @@ export class CircuitBreaker implements ICircuitBreaker {
     fn: () => Promise<T> | T,
     fallback?: () => Promise<T> | T
   ): Promise<T> {
+    if (this.isDestroyed) {
+      throw new PulsorCircuitBreakerError(
+        this.name,
+        this.failureCount,
+        this.config.failureThreshold,
+        { context: { state: 'DESTROYED', name: this.name } }
+      );
+    }
+
     if (!this.canExecute()) {
       this.rejectedCalls++;
       
       if (fallback) {
-        return await fallback();
+        try {
+          return await fallback();
+        } catch (fallbackError) {
+          throw new PulsorCircuitBreakerError(
+            this.name,
+            this.failureCount,
+            this.config.failureThreshold,
+            { 
+              context: { 
+                state: this.state, 
+                name: this.name,
+                fallbackError: fallbackError instanceof Error ? fallbackError.message : String(fallbackError)
+              } 
+            }
+          );
+        }
       }
       
       throw new PulsorCircuitBreakerError(
@@ -181,9 +215,12 @@ export class CircuitBreaker implements ICircuitBreaker {
     }
 
     const startTime = nowMs();
+    const initialState = this.state;
+    
+    // Atomic increment of counters
     this.totalCalls++;
     
-    if (this.state === 'HALF_OPEN') {
+    if (initialState === 'HALF_OPEN') {
       this.halfOpenCalls++;
     }
 
@@ -196,7 +233,10 @@ export class CircuitBreaker implements ICircuitBreaker {
     } catch (error) {
       const duration = nowMs() - startTime;
       
-      this.recordFailure(error as Error, duration);
+      // Only record failure if we're still in a valid state
+      if (!this.isDestroyed) {
+        this.recordFailure(error as Error, duration);
+      }
       throw error;
     }
   }
@@ -211,7 +251,9 @@ export class CircuitBreaker implements ICircuitBreaker {
 
     const executionDuration = duration ?? 0;
     const timestamp = nowMs();
+    const currentState = this.state;
     
+    // Atomic updates
     this.successfulCalls++;
     
     // Check for slow calls
@@ -228,16 +270,19 @@ export class CircuitBreaker implements ICircuitBreaker {
       });
     }
 
-    // Handle state transitions
-    switch (this.state) {
+    // Handle state transitions with race condition protection
+    switch (currentState) {
       case 'HALF_OPEN':
         if (this.halfOpenCalls >= this.config.halfOpenMaxCalls) {
-          this.transitionTo('CLOSED', 'Half-open test successful');
+          // Prevent multiple transitions
+          if (!this.stateLock.has('transition') && this.state === 'HALF_OPEN') {
+            this.transitionTo('CLOSED', 'Half-open test successful');
+          }
         }
         break;
       
       case 'CLOSED':
-        // Reset failure count on success
+        // Reset failure count on success (atomic operation)
         if (this.failureCount > 0) {
           this.failureCount = 0;
         }
@@ -262,7 +307,9 @@ export class CircuitBreaker implements ICircuitBreaker {
 
     const executionDuration = duration ?? 0;
     const timestamp = nowMs();
+    const currentState = this.state;
     
+    // Atomic updates
     this.failedCalls++;
     this.failureCount++;
     this.lastFailureTime = timestamp;
@@ -283,16 +330,18 @@ export class CircuitBreaker implements ICircuitBreaker {
       this.recordExecution(executionResult);
     }
 
-    // Handle state transitions
-    switch (this.state) {
+    // Handle state transitions with race condition protection
+    switch (currentState) {
       case 'CLOSED':
-        if (this.shouldOpen()) {
+        if (this.shouldOpen() && !this.stateLock.has('transition') && this.state === 'CLOSED') {
           this.transitionTo('OPEN', `Failure threshold exceeded: ${this.failureCount}`);
         }
         break;
       
       case 'HALF_OPEN':
-        this.transitionTo('OPEN', 'Failure during half-open test');
+        if (!this.stateLock.has('transition') && this.state === 'HALF_OPEN') {
+          this.transitionTo('OPEN', 'Failure during half-open test');
+        }
         break;
     }
   }
@@ -478,12 +527,30 @@ export class CircuitBreaker implements ICircuitBreaker {
       return;
     }
 
+    // Prevent any state transitions during destruction
+    this.stateLock.add('destroying');
     this.isDestroyed = true;
     
+    // Clean up monitoring timer
     if (this.monitoringTimer) {
       clearInterval(this.monitoringTimer);
       this.monitoringTimer = undefined;
     }
+    
+    // Clear all data structures to prevent memory leaks
+    this.executionHistory.length = 0;
+    this.stateHistory.length = 0;
+    this.responseTimes.length = 0;
+    this.stateLock.clear();
+    
+    // Reset counters
+    this.totalCalls = 0;
+    this.successfulCalls = 0;
+    this.failedCalls = 0;
+    this.slowCalls = 0;
+    this.rejectedCalls = 0;
+    this.failureCount = 0;
+    this.halfOpenCalls = 0;
   }
 
   /**
@@ -539,41 +606,62 @@ export class CircuitBreaker implements ICircuitBreaker {
   }
 
   /**
-   * Transition to new state
+   * Transition to new state with race condition protection
    */
   private transitionTo(newState: CircuitBreakerState, reason: string): void {
-    if (this.state === newState) {
+    if (this.isDestroyed || this.state === newState) {
       return;
     }
 
-    const oldState = this.state;
-    this.state = newState;
-    
-    // Reset half-open calls when transitioning
-    if (newState !== 'HALF_OPEN') {
-      this.halfOpenCalls = 0;
+    // Prevent concurrent state transitions
+    if (this.stateLock.has('transition')) {
+      return;
     }
     
-    // Transition to half-open when attempting reset
-    if (oldState === 'OPEN' && newState === 'CLOSED') {
-      this.state = 'HALF_OPEN';
-      newState = 'HALF_OPEN';
-    }
+    this.stateLock.add('transition');
+    
+    try {
+      const oldState = this.state;
+      const now = nowMs();
+      
+      // Prevent rapid state changes
+      if (now - this.lastStateChange < 100) { // 100ms minimum between transitions
+        return;
+      }
+      
+      this.lastStateChange = now;
+      this.state = newState;
+      
+      // Reset half-open calls when transitioning
+      if (newState !== 'HALF_OPEN') {
+        this.halfOpenCalls = 0;
+      }
+      
+      // Special handling for OPEN -> CLOSED transitions
+      if (oldState === 'OPEN' && newState === 'CLOSED') {
+        this.state = 'HALF_OPEN';
+        newState = 'HALF_OPEN';
+        this.halfOpenCalls = 0;
+      }
 
-    // Record state transition
-    const transition: StateTransition = {
-      from: oldState,
-      to: newState,
-      timestamp: nowMs(),
-      reason,
-      ...(this.config.enableMetrics && { metrics: this.getMetrics() })
-    };
-    
-    this.stateHistory.push(transition);
-    
-    // Keep state history size manageable
-    if (this.stateHistory.length > 100) {
-      this.stateHistory.splice(0, this.stateHistory.length - 100);
+      // Record state transition
+      const transition: StateTransition = {
+        from: oldState,
+        to: newState,
+        timestamp: now,
+        reason,
+        ...(this.config.enableMetrics && !this.isDestroyed && { metrics: this.getMetrics() })
+      };
+      
+      this.stateHistory.push(transition);
+      
+      // Keep state history size manageable
+      if (this.stateHistory.length > 100) {
+        this.stateHistory.splice(0, this.stateHistory.length - 100);
+      }
+    } finally {
+      // Always release the lock
+      this.stateLock.delete('transition');
     }
   }
 
@@ -607,30 +695,42 @@ export class CircuitBreaker implements ICircuitBreaker {
    * Perform periodic health and performance checks
    */
   private async performPeriodicCheck(): Promise<void> {
-    if (this.isDestroyed) {
+    if (this.isDestroyed || this.stateLock.has('destroying')) {
       return;
     }
 
-    // Perform health check if available
-    if (this.healthCheckFunction && this.state === 'OPEN') {
+    // Capture current state to prevent race conditions
+    const currentState = this.state;
+    
+    // Perform health check if available and in OPEN state
+    if (this.healthCheckFunction && currentState === 'OPEN') {
       try {
         const isHealthy = await this.performHealthCheck();
-        if (isHealthy && this.shouldAttemptReset()) {
+        if (isHealthy && this.shouldAttemptReset() && this.state === 'OPEN') {
           this.transitionTo('HALF_OPEN', 'Health check passed');
         }
       } catch (error) {
         // Health check failed, remain in current state
+        // Log error for debugging but don't propagate
+        if (error instanceof Error) {
+          console.warn(`Health check failed for circuit breaker '${this.name}':`, error.message);
+        }
       }
     }
 
     // Check for adaptive threshold adjustments
-    if (this.config.enableAdaptiveThreshold && this.state === 'CLOSED') {
-      const metrics = this.getMetrics();
-      
-      if (metrics.totalCalls >= this.config.minimumThroughput) {
-        if (metrics.slowCallRate > this.config.slowCallThreshold) {
-          this.transitionTo('OPEN', `High slow call rate: ${metrics.slowCallRate.toFixed(2)}%`);
+    if (this.config.enableAdaptiveThreshold && currentState === 'CLOSED') {
+      try {
+        const metrics = this.getMetrics();
+        
+        if (metrics.totalCalls >= this.config.minimumThroughput) {
+          if (metrics.slowCallRate > this.config.slowCallThreshold && this.state === 'CLOSED') {
+            this.transitionTo('OPEN', `High slow call rate: ${metrics.slowCallRate.toFixed(2)}%`);
+          }
         }
+      } catch (error) {
+        // Metrics calculation failed, skip this check
+        console.warn(`Metrics calculation failed for circuit breaker '${this.name}':`, error);
       }
     }
   }

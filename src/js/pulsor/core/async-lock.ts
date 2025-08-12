@@ -106,6 +106,7 @@ export class AsyncLock implements IAsyncLock {
   private readonly stats: LockStats;
   private readonly waitTimes: number[] = [];
   private deadlockDetectionTimer?: NodeJS.Timeout | undefined;
+  private readonly cleanupIntervals = new Map<string, NodeJS.Timeout>();
   private isDestroyed = false;
 
   constructor(config: Partial<AsyncLockConfig> = {}) {
@@ -335,19 +336,30 @@ export class AsyncLock implements IAsyncLock {
       this.releaseKey(key);
     }
 
-    // Reject all waiting requests
+    // Reject all waiting requests with proper cleanup
     for (const [key, queue] of this.waitingQueues) {
       for (const request of queue) {
         if (request.timeoutHandle) {
           clearTimeout(request.timeoutHandle);
         }
-        request.reject(new PulsorConcurrencyError(
-          `Lock acquisition cancelled: all locks released for key '${key}'`
-        ));
+        try {
+          request.reject(new PulsorConcurrencyError(
+            `Lock acquisition cancelled: all locks released for key '${key}'`
+          ));
+        } catch (error) {
+          // Handle potential race condition where reject might be called twice
+          console.warn(`Potential race condition in releaseAll for key '${key}':`, error);
+        }
       }
     }
 
     this.waitingQueues.clear();
+    
+    // Clean up stats to prevent memory leaks
+    if (this.config.enableStats) {
+      (this.stats as any).currentlyHeld = 0;
+      (this.stats as any).currentlyWaiting = 0;
+    }
   }
 
   /**
@@ -366,8 +378,19 @@ export class AsyncLock implements IAsyncLock {
       this.deadlockDetectionTimer = undefined;
     }
 
+    // Clear all cleanup intervals
+    for (const [key, interval] of this.cleanupIntervals) {
+      clearInterval(interval);
+    }
+    this.cleanupIntervals.clear();
+
     // Release all locks and reject waiting requests
     this.releaseAll();
+    
+    // Clear all data structures to prevent memory leaks
+    this.heldLocks.clear();
+    this.waitingQueues.clear();
+    this.waitTimes.length = 0;
   }
 
   /**
@@ -410,16 +433,23 @@ export class AsyncLock implements IAsyncLock {
     priority: number
   ): Promise<void> {
     return new Promise<void>((resolve, reject) => {
+      if (this.isDestroyed) {
+        reject(new PulsorConcurrencyError('AsyncLock has been destroyed'));
+        return;
+      }
+
       const requestId = generateExecutionId();
       const startTime = nowMs();
 
-      // Create timeout handler
+      // Create timeout handler with race condition protection
       const timeoutHandle = setTimeout(() => {
-        this.handleTimeout(key, requestId);
-        reject(new PulsorTimeoutError(
-          timeout,
-          { context: { key, message: `Lock acquisition timeout after ${timeout}ms for key '${key}'` } }
-        ));
+        if (!this.isDestroyed) {
+          this.handleTimeout(key, requestId);
+          reject(new PulsorTimeoutError(
+            timeout,
+            { context: { key, message: `Lock acquisition timeout after ${timeout}ms for key '${key}'` } }
+          ));
+        }
       }, timeout);
 
       // Create lock request
@@ -434,8 +464,8 @@ export class AsyncLock implements IAsyncLock {
             clearTimeout(timeoutHandle);
           }
           
-          // Record wait time
-          if (this.config.enableStats) {
+          // Record wait time with memory leak protection
+          if (this.config.enableStats && !this.isDestroyed) {
             const waitTime = nowMs() - startTime;
             this.waitTimes.push(waitTime);
             
@@ -456,9 +486,14 @@ export class AsyncLock implements IAsyncLock {
         timeoutHandle
       };
 
-      // Add to queue with priority ordering
+      // Add to queue with priority ordering and race condition protection
       let queue = this.waitingQueues.get(key);
       if (!queue) {
+        if (this.isDestroyed) {
+          clearTimeout(timeoutHandle);
+          reject(new PulsorConcurrencyError('AsyncLock has been destroyed'));
+          return;
+        }
         queue = [];
         this.waitingQueues.set(key, queue);
       }
@@ -471,8 +506,8 @@ export class AsyncLock implements IAsyncLock {
         queue.splice(insertIndex, 0, request);
       }
 
-      // Update stats
-      if (this.config.enableStats) {
+      // Update stats with thread safety
+      if (this.config.enableStats && !this.isDestroyed) {
         (this.stats as any).currentlyWaiting = this.getTotalWaitingCount();
       }
     });
@@ -482,23 +517,41 @@ export class AsyncLock implements IAsyncLock {
    * Process next waiting request for a key
    */
   private processNextWaiting(key: string): void {
+    if (this.isDestroyed) {
+      return;
+    }
+
     const queue = this.waitingQueues.get(key);
     if (!queue || queue.length === 0) {
       this.waitingQueues.delete(key);
       return;
     }
 
-    // Get highest priority request
-    const request = queue.shift()!;
+    // Get highest priority request with race condition protection
+    const request = queue.shift();
+    if (!request) {
+      this.waitingQueues.delete(key);
+      return;
+    }
+    
+    // Clean up timeout handle to prevent memory leak
+    if (request.timeoutHandle) {
+      clearTimeout(request.timeoutHandle);
+    }
     
     // Acquire lock for this request
     this.acquireLockImmediately(key, request.priority);
     
-    // Resolve the request
-    request.resolve();
+    // Resolve the request safely
+    try {
+      request.resolve();
+    } catch (error) {
+      // Handle potential race condition where resolve might be called twice
+      console.warn(`Potential race condition in processNextWaiting for key '${key}':`, error);
+    }
 
-    // Update stats
-    if (this.config.enableStats) {
+    // Update stats with thread safety
+    if (this.config.enableStats && !this.isDestroyed) {
       (this.stats as any).currentlyWaiting = this.getTotalWaitingCount();
     }
 
@@ -512,6 +565,10 @@ export class AsyncLock implements IAsyncLock {
    * Handle timeout for a lock request
    */
   private handleTimeout(key: string, requestId: string): void {
+    if (this.isDestroyed) {
+      return;
+    }
+
     const queue = this.waitingQueues.get(key);
     if (!queue) {
       return;
@@ -520,6 +577,13 @@ export class AsyncLock implements IAsyncLock {
     // Remove timed out request from queue
     const requestIndex = queue.findIndex(req => req.id === requestId);
     if (requestIndex !== -1) {
+      const request = queue[requestIndex];
+      
+      // Clean up timeout handle to prevent memory leak
+      if (request.timeoutHandle) {
+        clearTimeout(request.timeoutHandle);
+      }
+      
       queue.splice(requestIndex, 1);
       
       // Clean up empty queue
@@ -539,8 +603,14 @@ export class AsyncLock implements IAsyncLock {
    * Start deadlock detection
    */
   private startDeadlockDetection(): void {
+    if (this.deadlockDetectionTimer) {
+      clearInterval(this.deadlockDetectionTimer);
+    }
+    
     this.deadlockDetectionTimer = setInterval(() => {
-      this.detectDeadlocks();
+      if (!this.isDestroyed) {
+        this.detectDeadlocks();
+      }
     }, this.config.deadlockDetectionInterval);
   }
 
@@ -575,11 +645,20 @@ export class AsyncLock implements IAsyncLock {
    * Handle a detected deadlock
    */
   private handleDeadlock(key: string, request: LockRequest): void {
-    // Remove from queue
+    if (this.isDestroyed) {
+      return;
+    }
+
+    // Remove from queue with proper cleanup
     const queue = this.waitingQueues.get(key);
     if (queue) {
       const index = queue.findIndex(req => req.id === request.id);
       if (index !== -1) {
+        // Clean up timeout handle
+        if (request.timeoutHandle) {
+          clearTimeout(request.timeoutHandle);
+        }
+        
         queue.splice(index, 1);
         
         // Clean up empty queue
@@ -589,16 +668,21 @@ export class AsyncLock implements IAsyncLock {
       }
     }
 
-    // Update stats
-    if (this.config.enableStats) {
+    // Update stats with thread safety
+    if (this.config.enableStats && !this.isDestroyed) {
       (this.stats as any).totalDeadlocks++;
       (this.stats as any).currentlyWaiting = this.getTotalWaitingCount();
     }
 
-    // Reject the request
-    request.reject(new PulsorConcurrencyError(
-      `Potential deadlock detected for key '${key}' after ${MAX_DEADLOCK_WAIT_TIME}ms`
-    ));
+    // Reject the request safely
+    try {
+      request.reject(new PulsorConcurrencyError(
+        `Potential deadlock detected for key '${key}' after ${MAX_DEADLOCK_WAIT_TIME}ms`
+      ));
+    } catch (error) {
+      // Handle potential race condition where reject might be called twice
+      console.warn(`Potential race condition in handleDeadlock for key '${key}':`, error);
+    }
   }
 }
 
